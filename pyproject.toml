@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "obs-stream-mcp"
+version = "0.1.0"
+description = "MCP server for OBS Studio WebSocket v5 control"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "obsws-python>=1.7.0",
+]
+
+[project.scripts]
+obs-stream-mcp = "obs_stream_mcp.server:main"
