@@ -89,3 +89,30 @@ def register_tools(server: Server, controller: OBSController) -> None:
     async def call_tool(
         name: str, arguments: dict[str, Any] | None
     ) -> list[TextContent]:
+        arguments = arguments or {}
+
+        dispatch = {
+            "obs_connect": lambda: _run_sync(controller.connect),
+            "obs_get_status": lambda: _run_sync(controller.get_status),
+            "obs_get_scene_list": lambda: _run_sync(controller.get_scene_list),
+            "obs_create_scene": lambda: _run_sync(
+                controller.create_scene, arguments.get("scene_name", "")
+            ),
+            "obs_switch_scene": lambda: _run_sync(
+                controller.switch_scene, arguments.get("scene_name", "")
+            ),
+            "obs_start_stream": lambda: _run_sync(controller.start_stream),
+            "obs_stop_stream": lambda: _run_sync(controller.stop_stream),
+        }
+
+        handler = dispatch.get(name)
+        if handler is None:
+            return _json_text(
+                error_response(
+                    ErrorCode.INVALID_PARAMETER,
+                    f"Unknown tool: {name}",
+                )
+            )
+
+        result = await handler()
+        return _json_text(result)
