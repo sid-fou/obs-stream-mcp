@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from obs_stream_mcp.errors import ErrorCode, error_response, success_response
+from obs_stream_mcp.layout_loader import load_layout
 from obs_stream_mcp.obs_controller import OBSController
 
 
@@ -21,6 +22,19 @@ class SceneOrchestrator:
 
     def __init__(self, controller: OBSController) -> None:
         self._ctrl = controller
+
+    # ------------------------------------------------------------------
+    # Internal: stream guard
+    # ------------------------------------------------------------------
+
+    def _check_stream_guard(self, force: bool) -> dict[str, Any] | None:
+        """Block scene rebuilds while streaming unless force=True."""
+        if self._ctrl.is_streaming() and not force:
+            return error_response(
+                ErrorCode.STREAM_GUARD,
+                "Cannot rebuild scene while streaming. Set force=true to override.",
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Internal: scene setup + rollback
@@ -137,6 +151,7 @@ class SceneOrchestrator:
         scene_name: str = "Gaming",
         overwrite: bool = False,
         switch_to: bool = True,
+        force: bool = False,
     ) -> dict[str, Any]:
         """Build a gaming scene with game capture, display capture, webcam, and title overlay.
 
@@ -150,9 +165,14 @@ class SceneOrchestrator:
             scene_name: Name for the scene.
             overwrite: If True, clear existing scene sources. If False, fail on duplicate.
             switch_to: If True, switch to the scene after building.
+            force: If True, allow rebuild while streaming.
         """
         if not self._ctrl.connected:
             return self._ctrl._not_connected()
+
+        guard = self._check_stream_guard(force)
+        if guard:
+            return guard
 
         # Prepare scene.
         err = self._prepare_scene(scene_name, overwrite)
@@ -162,40 +182,27 @@ class SceneOrchestrator:
         if err:
             return err
 
-        # Define sources back-to-front.
+        # Load transforms from layout presets.
+        lt = "gaming"
         source_specs = [
             {
                 "name": f"{scene_name} - Game Capture",
                 "type": "game_capture",
                 "settings": {},
-                "transform": {
-                    "boundsType": "OBS_BOUNDS_STRETCH",
-                    "boundsWidth": 1920.0,
-                    "boundsHeight": 1080.0,
-                },
+                "transform": load_layout(lt, "game_capture"),
             },
             {
                 "name": f"{scene_name} - Display Capture",
                 "type": "monitor_capture",
                 "settings": {},
                 "enabled": False,
-                "transform": {
-                    "boundsType": "OBS_BOUNDS_STRETCH",
-                    "boundsWidth": 1920.0,
-                    "boundsHeight": 1080.0,
-                },
+                "transform": load_layout(lt, "display_capture"),
             },
             {
                 "name": f"{scene_name} - Webcam",
                 "type": "dshow_input",
                 "settings": {},
-                "transform": {
-                    "positionX": 1520.0,
-                    "positionY": 780.0,
-                    "boundsType": "OBS_BOUNDS_STRETCH",
-                    "boundsWidth": 384.0,
-                    "boundsHeight": 288.0,
-                },
+                "transform": load_layout(lt, "webcam"),
             },
             {
                 "name": f"{scene_name} - Stream Title",
@@ -205,10 +212,7 @@ class SceneOrchestrator:
                     "font": {"face": "Arial", "size": 48},
                     "color": 16777215,
                 },
-                "transform": {
-                    "positionX": 20.0,
-                    "positionY": 20.0,
-                },
+                "transform": load_layout(lt, "stream_title"),
             },
         ]
 
@@ -229,14 +233,9 @@ class SceneOrchestrator:
         title_text: str = "Starting Soon...",
         countdown_url: str | None = None,
         image_path: str | None = None,
+        force: bool = False,
     ) -> dict[str, Any]:
         """Build a 'Starting Soon' scene with background, title, optional countdown and image.
-
-        Sources (back to front):
-          1. Background    — color_source_v3, full canvas
-          2. Image         — image_source (only if image_path provided)
-          3. Countdown     — browser_source (only if countdown_url provided)
-          4. Title Text    — text_gdiplus_v3, centered
 
         Args:
             scene_name: Name for the scene.
@@ -246,16 +245,21 @@ class SceneOrchestrator:
             title_text: Text to display.
             countdown_url: Optional URL for a browser source countdown widget.
             image_path: Optional file path for a background/overlay image.
+            force: If True, allow rebuild while streaming.
         """
         if not self._ctrl.connected:
             return self._ctrl._not_connected()
+
+        guard = self._check_stream_guard(force)
+        if guard:
+            return guard
 
         err = self._prepare_scene(scene_name, overwrite)
         scene_created = err is None
         if err:
             return err
 
-        # Build source list dynamically.
+        lt = "starting_soon"
         source_specs: list[dict[str, Any]] = [
             {
                 "name": f"{scene_name} - Background",
@@ -265,11 +269,7 @@ class SceneOrchestrator:
                     "width": 1920,
                     "height": 1080,
                 },
-                "transform": {
-                    "boundsType": "OBS_BOUNDS_STRETCH",
-                    "boundsWidth": 1920.0,
-                    "boundsHeight": 1080.0,
-                },
+                "transform": load_layout(lt, "background"),
             },
         ]
 
@@ -279,11 +279,7 @@ class SceneOrchestrator:
                     "name": f"{scene_name} - Image",
                     "type": "image_source",
                     "settings": {"file": image_path},
-                    "transform": {
-                        "boundsType": "OBS_BOUNDS_STRETCH",
-                        "boundsWidth": 1920.0,
-                        "boundsHeight": 1080.0,
-                    },
+                    "transform": load_layout(lt, "image"),
                 }
             )
 
@@ -297,10 +293,7 @@ class SceneOrchestrator:
                         "width": 800,
                         "height": 200,
                     },
-                    "transform": {
-                        "positionX": 560.0,
-                        "positionY": 700.0,
-                    },
+                    "transform": load_layout(lt, "countdown"),
                 }
             )
 
@@ -314,10 +307,7 @@ class SceneOrchestrator:
                     "color": 16777215,
                     "align": "center",
                 },
-                "transform": {
-                    "positionX": 560.0,
-                    "positionY": 450.0,
-                },
+                "transform": load_layout(lt, "title"),
             }
         )
 

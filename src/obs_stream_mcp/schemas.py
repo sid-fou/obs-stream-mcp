@@ -54,7 +54,15 @@ START_STREAM_SCHEMA: dict = {
 
 STOP_STREAM_SCHEMA: dict = {
     "type": "object",
-    "properties": {},
+    "properties": {
+        "confirmed": {
+            "type": "boolean",
+            "description": (
+                "Must be true to stop the stream. "
+                "Prevents accidental stream stops."
+            ),
+        },
+    },
     "additionalProperties": False,
 }
 
@@ -212,6 +220,10 @@ BUILD_GAMING_SCENE_SCHEMA: dict = {
             "type": "boolean",
             "description": "If true (default), switch to the scene after building.",
         },
+        "force": {
+            "type": "boolean",
+            "description": "If true, allow scene rebuild while streaming. Default false.",
+        },
     },
     "additionalProperties": False,
 }
@@ -250,6 +262,27 @@ BUILD_STARTING_SOON_SCENE_SCHEMA: dict = {
             "type": "string",
             "description": "Optional file path for a background/overlay image.",
         },
+        "force": {
+            "type": "boolean",
+            "description": "If true, allow scene rebuild while streaming. Default false.",
+        },
     },
+    "additionalProperties": False,
+}
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Diagnostics and safety schemas
+# ---------------------------------------------------------------------------
+
+HEALTH_CHECK_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+LIST_DEVICES_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
     "additionalProperties": False,
 }

@@ -1,0 +1,45 @@
+{
+  "gaming": {
+    "game_capture": {
+      "boundsType": "OBS_BOUNDS_STRETCH",
+      "boundsWidth": 1920.0,
+      "boundsHeight": 1080.0
+    },
+    "display_capture": {
+      "boundsType": "OBS_BOUNDS_STRETCH",
+      "boundsWidth": 1920.0,
+      "boundsHeight": 1080.0
+    },
+    "webcam": {
+      "positionX": 1520.0,
+      "positionY": 780.0,
+      "boundsType": "OBS_BOUNDS_STRETCH",
+      "boundsWidth": 384.0,
+      "boundsHeight": 288.0
+    },
+    "stream_title": {
+      "positionX": 20.0,
+      "positionY": 20.0
+    }
+  },
+  "starting_soon": {
+    "background": {
+      "boundsType": "OBS_BOUNDS_STRETCH",
+      "boundsWidth": 1920.0,
+      "boundsHeight": 1080.0
+    },
+    "image": {
+      "boundsType": "OBS_BOUNDS_STRETCH",
+      "boundsWidth": 1920.0,
+      "boundsHeight": 1080.0
+    },
+    "countdown": {
+      "positionX": 560.0,
+      "positionY": 700.0
+    },
+    "title": {
+      "positionX": 560.0,
+      "positionY": 450.0
+    }
+  }
+}

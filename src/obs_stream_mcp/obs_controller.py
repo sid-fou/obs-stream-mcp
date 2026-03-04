@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import obsws_python as obs
@@ -101,6 +102,141 @@ class OBSController:
             return error_response(code, msg)
 
     # ------------------------------------------------------------------
+    # Diagnostics (Phase 4)
+    # ------------------------------------------------------------------
+
+    def health_check(self) -> dict[str, Any]:
+        """Return comprehensive OBS health and diagnostics.
+
+        Includes connection status, streaming/recording state, current scene,
+        OBS version info, and WebSocket round-trip latency.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        try:
+            # Measure latency.
+            start = time.perf_counter()
+            version = self._client.get_version()  # type: ignore[union-attr]
+            latency_ms = round((time.perf_counter() - start) * 1000, 1)
+
+            stream = self._client.get_stream_status()  # type: ignore[union-attr]
+            record = self._client.get_record_status()  # type: ignore[union-attr]
+            scenes = self._client.get_scene_list()  # type: ignore[union-attr]
+
+            return success_response(
+                {
+                    "connected": True,
+                    "obs_version": version.obs_version,
+                    "ws_version": version.obs_web_socket_version,
+                    "platform": version.platform_description,
+                    "ws_latency_ms": latency_ms,
+                    "streaming": stream.output_active,
+                    "stream_timecode": stream.output_timecode,
+                    "recording": record.output_active,
+                    "recording_paused": record.output_paused,
+                    "current_scene": scenes.current_program_scene_name,
+                    "scene_count": len(scenes.scenes),
+                }
+            )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    def list_devices(self) -> dict[str, Any]:
+        """Return available video and audio devices.
+
+        Creates temporary inputs to probe device lists, then cleans up.
+        Prevents device name guessing.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        probe_scene = "__device_probe_scene"
+        created_scene = False
+        probes_created: list[str] = []
+
+        try:
+            # Create a temporary scene for probing.
+            self._client.create_scene(probe_scene)  # type: ignore[union-attr]
+            created_scene = True
+
+            devices: dict[str, Any] = {"video": [], "audio_input": [], "audio_output": []}
+
+            # Probe video devices (dshow_input).
+            vname = "__probe_video"
+            self._client.create_input(probe_scene, vname, "dshow_input", {}, False)  # type: ignore[union-attr]
+            probes_created.append(vname)
+            try:
+                resp = self._client.get_input_properties_list_property_items(vname, "video_device_id")  # type: ignore[union-attr]
+                devices["video"] = [
+                    {"name": d["itemName"], "id": d["itemValue"]}
+                    for d in resp.property_items
+                    if d.get("itemEnabled", True)
+                ]
+            except Exception:
+                pass
+
+            # Probe audio input devices (wasapi_input_capture).
+            aname = "__probe_audio_in"
+            self._client.create_input(probe_scene, aname, "wasapi_input_capture", {}, False)  # type: ignore[union-attr]
+            probes_created.append(aname)
+            try:
+                resp = self._client.get_input_properties_list_property_items(aname, "device_id")  # type: ignore[union-attr]
+                devices["audio_input"] = [
+                    {"name": d["itemName"], "id": d["itemValue"]}
+                    for d in resp.property_items
+                    if d.get("itemEnabled", True)
+                ]
+            except Exception:
+                pass
+
+            # Probe audio output devices (wasapi_output_capture).
+            aoname = "__probe_audio_out"
+            self._client.create_input(probe_scene, aoname, "wasapi_output_capture", {}, False)  # type: ignore[union-attr]
+            probes_created.append(aoname)
+            try:
+                resp = self._client.get_input_properties_list_property_items(aoname, "device_id")  # type: ignore[union-attr]
+                devices["audio_output"] = [
+                    {"name": d["itemName"], "id": d["itemValue"]}
+                    for d in resp.property_items
+                    if d.get("itemEnabled", True)
+                ]
+            except Exception:
+                pass
+
+            return success_response(devices)
+
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+        finally:
+            # Cleanup probes and scene.
+            for pname in probes_created:
+                try:
+                    self._client.remove_input(pname)  # type: ignore[union-attr]
+                except Exception:
+                    pass
+            if created_scene:
+                try:
+                    self._client.remove_scene(probe_scene)  # type: ignore[union-attr]
+                except Exception:
+                    pass
+
+    # ------------------------------------------------------------------
+    # Streaming helpers (Phase 4)
+    # ------------------------------------------------------------------
+
+    def is_streaming(self) -> bool:
+        """Return True if OBS is currently streaming."""
+        if not self._require_connection():
+            return False
+        try:
+            return self._client.get_stream_status().output_active  # type: ignore[union-attr]
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------
     # Scene management
     # ------------------------------------------------------------------
 
@@ -193,9 +329,18 @@ class OBSController:
     # ------------------------------------------------------------------
 
     def start_stream(self) -> dict[str, Any]:
-        """Start the OBS stream output."""
+        """Start the OBS stream output.
+
+        Returns STREAM_ALREADY_ACTIVE if already streaming.
+        """
         if not self._require_connection():
             return self._not_connected()
+
+        if self.is_streaming():
+            return error_response(
+                ErrorCode.STREAM_ALREADY_ACTIVE,
+                "Stream is already active",
+            )
 
         try:
             self._client.start_stream()  # type: ignore[union-attr]
@@ -204,10 +349,26 @@ class OBSController:
             code, msg = classify_obs_error(exc)
             return error_response(code, msg)
 
-    def stop_stream(self) -> dict[str, Any]:
-        """Stop the OBS stream output."""
+    def stop_stream(self, confirmed: bool = False) -> dict[str, Any]:
+        """Stop the OBS stream output.
+
+        Requires confirmed=True to prevent accidental stops.
+        Returns STREAM_NOT_ACTIVE if not currently streaming.
+        """
         if not self._require_connection():
             return self._not_connected()
+
+        if not confirmed:
+            return error_response(
+                ErrorCode.CONFIRMATION_REQUIRED,
+                "Stopping a stream requires confirmed=true to prevent accidental stops",
+            )
+
+        if not self.is_streaming():
+            return error_response(
+                ErrorCode.STREAM_NOT_ACTIVE,
+                "Stream is not active",
+            )
 
         try:
             self._client.stop_stream()  # type: ignore[union-attr]
