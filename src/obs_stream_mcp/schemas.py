@@ -188,3 +188,68 @@ SET_SOURCE_VISIBILITY_SCHEMA: dict = {
     "required": ["scene_name", "source_name", "visible"],
     "additionalProperties": False,
 }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Scene orchestration schemas
+# ---------------------------------------------------------------------------
+
+BUILD_GAMING_SCENE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name for the gaming scene. Defaults to 'Gaming'.",
+        },
+        "overwrite": {
+            "type": "boolean",
+            "description": (
+                "If true, clear and rebuild the scene if it already exists. "
+                "If false (default), return DUPLICATE_SCENE error."
+            ),
+        },
+        "switch_to": {
+            "type": "boolean",
+            "description": "If true (default), switch to the scene after building.",
+        },
+    },
+    "additionalProperties": False,
+}
+
+BUILD_STARTING_SOON_SCENE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name for the scene. Defaults to 'Starting Soon'.",
+        },
+        "overwrite": {
+            "type": "boolean",
+            "description": (
+                "If true, clear and rebuild the scene if it already exists. "
+                "If false (default), return DUPLICATE_SCENE error."
+            ),
+        },
+        "switch_to": {
+            "type": "boolean",
+            "description": "If true (default), switch to the scene after building.",
+        },
+        "background_color": {
+            "type": "integer",
+            "description": "ABGR color integer for the background. Defaults to dark gray.",
+        },
+        "title_text": {
+            "type": "string",
+            "description": "Text to display. Defaults to 'Starting Soon...'.",
+        },
+        "countdown_url": {
+            "type": "string",
+            "description": "Optional URL for a browser source countdown widget.",
+        },
+        "image_path": {
+            "type": "string",
+            "description": "Optional file path for a background/overlay image.",
+        },
+    },
+    "additionalProperties": False,
+}

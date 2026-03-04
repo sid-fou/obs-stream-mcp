@@ -11,8 +11,11 @@ from mcp.types import TextContent, Tool
 
 from obs_stream_mcp.errors import ErrorCode, error_response
 from obs_stream_mcp.obs_controller import OBSController
+from obs_stream_mcp.orchestrator import SceneOrchestrator
 from obs_stream_mcp.schemas import (
     ADD_SOURCE_SCHEMA,
+    BUILD_GAMING_SCENE_SCHEMA,
+    BUILD_STARTING_SOON_SCENE_SCHEMA,
     CONNECT_SCHEMA,
     CREATE_SCENE_SCHEMA,
     GET_SCENE_LIST_SCHEMA,
@@ -101,6 +104,24 @@ TOOLS: list[Tool] = [
         description="Show or hide a source in a scene.",
         inputSchema=SET_SOURCE_VISIBILITY_SCHEMA,
     ),
+    # Phase 3: Scene orchestration
+    Tool(
+        name="build_gaming_scene",
+        description=(
+            "Build a complete gaming scene with Game Capture, Display Capture, "
+            "Webcam, and Stream Title overlay. Supports overwrite and auto-switch."
+        ),
+        inputSchema=BUILD_GAMING_SCENE_SCHEMA,
+    ),
+    Tool(
+        name="build_starting_soon_scene",
+        description=(
+            "Build a 'Starting Soon' scene with color background, title text, "
+            "optional countdown browser source, and optional image overlay. "
+            "Supports overwrite and auto-switch."
+        ),
+        inputSchema=BUILD_STARTING_SOON_SCENE_SCHEMA,
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -110,7 +131,7 @@ TOOLS: list[Tool] = [
 
 def _json_text(data: dict[str, Any]) -> list[TextContent]:
     """Wrap a dict as a single TextContent JSON blob."""
-    return [TextContent(type="text", text=json.dumps(data))]
+    return [TextContent(type="text", text=json.dumps(data, default=str))]
 
 
 async def _run_sync(func, *args):
@@ -120,6 +141,7 @@ async def _run_sync(func, *args):
 
 def register_tools(server: Server, controller: OBSController) -> None:
     """Register list_tools and call_tool handlers on the MCP server."""
+    orchestrator = SceneOrchestrator(controller)
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -173,6 +195,23 @@ def register_tools(server: Server, controller: OBSController) -> None:
                 arguments.get("scene_name", ""),
                 arguments.get("source_name", ""),
                 arguments.get("visible", True),
+            ),
+            # Phase 3
+            "build_gaming_scene": lambda: _run_sync(
+                orchestrator.build_gaming_scene,
+                arguments.get("scene_name", "Gaming"),
+                arguments.get("overwrite", False),
+                arguments.get("switch_to", True),
+            ),
+            "build_starting_soon_scene": lambda: _run_sync(
+                orchestrator.build_starting_soon_scene,
+                arguments.get("scene_name", "Starting Soon"),
+                arguments.get("overwrite", False),
+                arguments.get("switch_to", True),
+                arguments.get("background_color", 4281348144),
+                arguments.get("title_text", "Starting Soon..."),
+                arguments.get("countdown_url"),
+                arguments.get("image_path"),
             ),
         }
 
