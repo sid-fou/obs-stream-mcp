@@ -186,6 +186,37 @@ class OBSUIController:
             time.sleep(0.2)
         return None
 
+    def _dismiss_warning_dialog(self, obs_win, timeout: float = 2.0) -> str | None:
+        """Check for and dismiss a Warning/Error QMessageBox.
+
+        Returns the warning message text if a dialog was found and dismissed,
+        or None if no dialog appeared.
+        """
+        try:
+            for title in ("Warning", "Error"):
+                msgbox = obs_win.child_window(title=title, class_name="QMessageBox")
+                if msgbox.exists(timeout=timeout):
+                    # Extract the message text.
+                    msg = ""
+                    try:
+                        label = msgbox.child_window(control_type="Text", found_index=0)
+                        msg = label.window_text()
+                    except Exception:
+                        msg = f"{title} dialog appeared"
+                    # Dismiss it.
+                    try:
+                        ok_btn = msgbox.child_window(title="OK", class_name="QPushButton")
+                        ok_btn.click_input()
+                        time.sleep(self._ACTION_DELAY)
+                    except Exception:
+                        import pywinauto.keyboard
+                        pywinauto.keyboard.send_keys("{ENTER}")
+                        time.sleep(self._ACTION_DELAY)
+                    return msg
+        except Exception:
+            pass
+        return None
+
     def _wait_for_dialog_close(self, obs_win, title: str, timeout: float = 5.0) -> bool:
         """Wait for a dialog to close."""
         deadline = time.time() + timeout
@@ -627,6 +658,14 @@ class OBSUIController:
             except Exception as e:
                 return error_response(ErrorCode.UI_AUTOMATION_FAILED, f"Failed to click Start: {e}")
 
+            # Check for warning dialog (e.g., encoder not available).
+            warning_msg = self._dismiss_warning_dialog(obs, timeout=1.5)
+            if warning_msg:
+                return error_response(
+                    ErrorCode.STREAM_START_FAILED,
+                    f"OBS refused to start target '{target_name}': {warning_msg}",
+                )
+
             # Wait briefly and check status
             time.sleep(1.5)
             try:
@@ -741,6 +780,14 @@ class OBSUIController:
                 start_all_btn.click_input()
             except Exception as e:
                 return error_response(ErrorCode.UI_AUTOMATION_FAILED, f"Failed to click 'Start all': {e}")
+
+            # Check for warning dialog (e.g., encoder not available).
+            warning_msg = self._dismiss_warning_dialog(obs, timeout=1.5)
+            if warning_msg:
+                return error_response(
+                    ErrorCode.STREAM_START_FAILED,
+                    f"OBS refused to start targets: {warning_msg}",
+                )
 
             time.sleep(2.0)
             targets = self._list_all_targets(dock)

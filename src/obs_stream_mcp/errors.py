@@ -29,6 +29,7 @@ class ErrorCode(str, Enum):
     DUPLICATE_RTMP_TARGET = "DUPLICATE_RTMP_TARGET"
     UI_ELEMENT_NOT_FOUND = "UI_ELEMENT_NOT_FOUND"
     UI_AUTOMATION_FAILED = "UI_AUTOMATION_FAILED"
+    STREAM_START_FAILED = "STREAM_START_FAILED"
 
 
 def error_response(code: ErrorCode, message: str) -> dict[str, Any]:
