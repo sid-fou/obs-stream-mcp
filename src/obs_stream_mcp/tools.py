@@ -31,6 +31,16 @@ from obs_stream_mcp.schemas import (
     START_STREAM_SCHEMA,
     STOP_STREAM_SCHEMA,
     SWITCH_SCENE_SCHEMA,
+    # Multi-RTMP UI automation schemas
+    DETECT_MULTI_RTMP_SCHEMA,
+    LIST_RTMP_TARGETS_SCHEMA,
+    ADD_RTMP_TARGET_SCHEMA,
+    MODIFY_RTMP_TARGET_SCHEMA,
+    REMOVE_RTMP_TARGET_SCHEMA,
+    START_RTMP_TARGET_SCHEMA,
+    STOP_RTMP_TARGET_SCHEMA,
+    START_ALL_RTMP_TARGETS_SCHEMA,
+    STOP_ALL_RTMP_TARGETS_SCHEMA,
 )
 
 TOOLS: list[Tool] = [
@@ -52,6 +62,16 @@ TOOLS: list[Tool] = [
     Tool(name="obs_set_source_visibility", description="Show or hide a source in a scene.", inputSchema=SET_SOURCE_VISIBILITY_SCHEMA),
     Tool(name="build_gaming_scene", description="Build a complete gaming scene with Game Capture, Display Capture, Webcam, and Stream Title overlay. Supports overwrite and auto-switch.", inputSchema=BUILD_GAMING_SCENE_SCHEMA),
     Tool(name="build_starting_soon_scene", description="Build a 'Starting Soon' scene with color background, title text, optional countdown browser source, and optional image overlay. Supports overwrite and auto-switch.", inputSchema=BUILD_STARTING_SOON_SCENE_SCHEMA),
+    # Multi-RTMP UI automation tools (requires obs-multi-rtmp plugin)
+    Tool(name="obs_detect_multi_rtmp_plugin", description="Check if the obs-multi-rtmp plugin is installed and its dock is visible in OBS.", inputSchema=DETECT_MULTI_RTMP_SCHEMA),
+    Tool(name="obs_list_rtmp_targets", description="List all configured RTMP targets from the Multiple Output dock, including active/inactive state.", inputSchema=LIST_RTMP_TARGETS_SCHEMA),
+    Tool(name="obs_add_rtmp_target", description="Add a new RTMP streaming target via the plugin UI. Requires name, server URL, and stream key.", inputSchema=ADD_RTMP_TARGET_SCHEMA),
+    Tool(name="obs_modify_rtmp_target", description="Modify an existing RTMP target's name, server, or stream key via the plugin UI.", inputSchema=MODIFY_RTMP_TARGET_SCHEMA),
+    Tool(name="obs_remove_rtmp_target", description="Remove an RTMP target. Requires confirmed=true.", inputSchema=REMOVE_RTMP_TARGET_SCHEMA),
+    Tool(name="obs_start_rtmp_target", description="Start streaming to a specific RTMP target. Main OBS stream must be running first (shared encoder).", inputSchema=START_RTMP_TARGET_SCHEMA),
+    Tool(name="obs_stop_rtmp_target", description="Stop streaming to a specific RTMP target. Requires confirmed=true.", inputSchema=STOP_RTMP_TARGET_SCHEMA),
+    Tool(name="obs_start_all_rtmp_targets", description="Start all configured RTMP targets simultaneously.", inputSchema=START_ALL_RTMP_TARGETS_SCHEMA),
+    Tool(name="obs_stop_all_rtmp_targets", description="Stop all active RTMP targets. Requires confirmed=true.", inputSchema=STOP_ALL_RTMP_TARGETS_SCHEMA),
 ]
 
 
@@ -63,7 +83,7 @@ async def _run_sync(func, *args):
     return await asyncio.to_thread(func, *args)
 
 
-def register_tools(server: Server, controller: OBSController) -> None:
+def register_tools(server: Server, controller: OBSController, ui_controller=None) -> None:
     orchestrator = SceneOrchestrator(controller)
 
     @server.list_tools()
@@ -132,6 +152,45 @@ def register_tools(server: Server, controller: OBSController) -> None:
                 arguments.get("force", False),
             ),
         }
+
+        # UI automation dispatch (only if ui_controller is available)
+        if ui_controller is not None:
+            dispatch.update({
+                "obs_detect_multi_rtmp_plugin": lambda: _run_sync(ui_controller.detect_plugin),
+                "obs_list_rtmp_targets": lambda: _run_sync(ui_controller.list_rtmp_targets),
+                "obs_add_rtmp_target": lambda: _run_sync(
+                    ui_controller.add_rtmp_target,
+                    arguments.get("name", ""),
+                    arguments.get("server", ""),
+                    arguments.get("stream_key", ""),
+                ),
+                "obs_modify_rtmp_target": lambda: _run_sync(
+                    ui_controller.modify_rtmp_target,
+                    arguments.get("target_name", ""),
+                    arguments.get("new_name"),
+                    arguments.get("server"),
+                    arguments.get("stream_key"),
+                ),
+                "obs_remove_rtmp_target": lambda: _run_sync(
+                    ui_controller.remove_rtmp_target,
+                    arguments.get("target_name", ""),
+                    arguments.get("confirmed", False),
+                ),
+                "obs_start_rtmp_target": lambda: _run_sync(
+                    ui_controller.start_rtmp_target,
+                    arguments.get("target_name", ""),
+                ),
+                "obs_stop_rtmp_target": lambda: _run_sync(
+                    ui_controller.stop_rtmp_target,
+                    arguments.get("target_name", ""),
+                    arguments.get("confirmed", False),
+                ),
+                "obs_start_all_rtmp_targets": lambda: _run_sync(ui_controller.start_all_rtmp_targets),
+                "obs_stop_all_rtmp_targets": lambda: _run_sync(
+                    ui_controller.stop_all_rtmp_targets,
+                    arguments.get("confirmed", False),
+                ),
+            })
 
         handler = dispatch.get(name)
         if handler is None:

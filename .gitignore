@@ -16,3 +16,10 @@ ENV/
 *.swo
 *~
 .DS_Store
+
+# Scratch / exploration scripts
+explore_*.py
+close_dialog.py
+check_deps.py
+test_*.py
+run_test.py

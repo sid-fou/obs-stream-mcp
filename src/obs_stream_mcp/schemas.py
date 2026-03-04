@@ -322,3 +322,133 @@ SET_STREAM_SETTINGS_SCHEMA: dict = {
     },
     "additionalProperties": False,
 }
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 Extended: Multi-RTMP UI automation schemas
+# ---------------------------------------------------------------------------
+
+DETECT_MULTI_RTMP_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+LIST_RTMP_TARGETS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+ADD_RTMP_TARGET_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": "Display name for the RTMP target.",
+            "minLength": 1,
+        },
+        "server": {
+            "type": "string",
+            "description": "RTMP/RTMPS server URL (e.g., rtmp://live.twitch.tv/app).",
+            "minLength": 1,
+        },
+        "stream_key": {
+            "type": "string",
+            "description": "Stream key for the target. Never stored or logged.",
+            "minLength": 1,
+        },
+    },
+    "required": ["name", "server", "stream_key"],
+    "additionalProperties": False,
+}
+
+MODIFY_RTMP_TARGET_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "target_name": {
+            "type": "string",
+            "description": "Current name of the RTMP target to modify.",
+            "minLength": 1,
+        },
+        "new_name": {
+            "type": "string",
+            "description": "New display name. Omit to keep current name.",
+        },
+        "server": {
+            "type": "string",
+            "description": "New RTMP/RTMPS server URL. Omit to keep current.",
+        },
+        "stream_key": {
+            "type": "string",
+            "description": "New stream key. Omit to keep current. Never stored or logged.",
+        },
+    },
+    "required": ["target_name"],
+    "additionalProperties": False,
+}
+
+REMOVE_RTMP_TARGET_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "target_name": {
+            "type": "string",
+            "description": "Name of the RTMP target to remove.",
+            "minLength": 1,
+        },
+        "confirmed": {
+            "type": "boolean",
+            "description": "Must be true to confirm deletion. Prevents accidental removal.",
+        },
+    },
+    "required": ["target_name"],
+    "additionalProperties": False,
+}
+
+START_RTMP_TARGET_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "target_name": {
+            "type": "string",
+            "description": "Name of the RTMP target to start.",
+            "minLength": 1,
+        },
+    },
+    "required": ["target_name"],
+    "additionalProperties": False,
+}
+
+STOP_RTMP_TARGET_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "target_name": {
+            "type": "string",
+            "description": "Name of the RTMP target to stop.",
+            "minLength": 1,
+        },
+        "confirmed": {
+            "type": "boolean",
+            "description": "Must be true to stop the target. Prevents accidental stops.",
+        },
+    },
+    "required": ["target_name"],
+    "additionalProperties": False,
+}
+
+START_ALL_RTMP_TARGETS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+STOP_ALL_RTMP_TARGETS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "confirmed": {
+            "type": "boolean",
+            "description": "Must be true to stop all targets. Prevents accidental stops.",
+        },
+    },
+    "additionalProperties": False,
+}

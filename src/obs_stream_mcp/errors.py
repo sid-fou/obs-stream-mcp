@@ -23,6 +23,13 @@ class ErrorCode(str, Enum):
     INVALID_PARAMETER = "INVALID_PARAMETER"
     OBS_ERROR = "OBS_ERROR"
 
+    # UI automation error codes
+    MULTI_RTMP_PLUGIN_NOT_FOUND = "MULTI_RTMP_PLUGIN_NOT_FOUND"
+    RTMP_TARGET_NOT_FOUND = "RTMP_TARGET_NOT_FOUND"
+    DUPLICATE_RTMP_TARGET = "DUPLICATE_RTMP_TARGET"
+    UI_ELEMENT_NOT_FOUND = "UI_ELEMENT_NOT_FOUND"
+    UI_AUTOMATION_FAILED = "UI_AUTOMATION_FAILED"
+
 
 def error_response(code: ErrorCode, message: str) -> dict[str, Any]:
     """Build a structured error response."""
