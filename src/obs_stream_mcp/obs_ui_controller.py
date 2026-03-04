@@ -210,80 +210,67 @@ class OBSUIController:
 
         Returns None on success, or an error_response dict on failure.
 
-        Dialog structure (obs-multi-rtmp plugin):
-          QScrollArea > viewport > main_group
-            - Edit (Name field)
-            - QTabWidget > stacked_widget > nested groups > Edit (URL), Edit (Key)
+        Dialog layout (obs-multi-rtmp plugin):
+          Edit[0] = Name       (direct child of main scroll content)
+          Edit[1] = URL        (inside Service tab stacked widget)
+          Edit[2] = Stream Key (inside Service tab stacked widget)
+          Edit[3] = Resolution (inside Video Settings group — ignored)
         """
         try:
-            scroll_group = dialog.child_window(control_type="Group", found_index=0)
-            viewport = scroll_group.child_window(control_type="Group", found_index=0)
-            main_group = viewport.child_window(control_type="Group", found_index=0)
+            all_edits = dialog.descendants(control_type="Edit")
         except Exception:
             return error_response(
                 ErrorCode.UI_ELEMENT_NOT_FOUND,
-                "Could not locate dialog scroll area structure",
+                "Could not enumerate edit fields in dialog",
             )
 
-        # --- Name field (first Edit directly under main_group) ---
-        if name is not None:
+        if len(all_edits) < 3:
+            return error_response(
+                ErrorCode.UI_ELEMENT_NOT_FOUND,
+                f"Expected at least 3 edit fields in dialog, found {len(all_edits)}",
+            )
+
+        name_field = all_edits[0]
+        url_field = all_edits[1]
+        key_field = all_edits[2]
+
+        def _set_field(field, value: str) -> dict[str, Any] | None:
             try:
-                name_field = main_group.child_window(control_type="Edit", found_index=0)
-                name_field.click_input()
-                name_field.type_keys("^a", pause=0.05)
-                name_field.type_keys(name, with_spaces=True, pause=0.02)
+                field.click_input()
+                field.type_keys("^a", pause=0.05)
+                field.type_keys(value, with_spaces=True, pause=0.02)
                 time.sleep(self._ACTION_DELAY)
-            except Exception:
+                return None
+            except Exception as exc:
                 return error_response(
-                    ErrorCode.UI_ELEMENT_NOT_FOUND,
-                    "Could not find Name field in dialog",
+                    ErrorCode.UI_AUTOMATION_FAILED,
+                    f"Failed to set field value: {exc}",
                 )
 
-        # --- URL and Stream Key (inside Service tab of QTabWidget) ---
+        if name is not None:
+            err = _set_field(name_field, name)
+            if err:
+                return err
+
+        # Ensure Service tab is selected before filling URL/key.
         if server is not None or stream_key is not None:
-            # Click the Service tab to ensure it's active.
             try:
-                tab_ctrl = main_group.child_window(control_type="Tab")
-                service_item = tab_ctrl.child_window(title="Service", control_type="TabItem")
-                service_item.click_input()
+                tab_bar = dialog.child_window(control_type="Tab")
+                service_tab = tab_bar.child_window(title="Service", control_type="TabItem")
+                service_tab.click_input()
                 time.sleep(self._ACTION_DELAY)
             except Exception:
                 pass  # May already be selected or only one tab
 
-            # Find the stacked widget (Custom control) inside the tab widget group.
-            try:
-                tab_group = main_group.child_window(control_type="Group", found_index=2)
-                stacked = tab_group.child_window(control_type="Custom")
-            except Exception:
-                return error_response(
-                    ErrorCode.UI_ELEMENT_NOT_FOUND,
-                    "Could not locate tab widget stacked content",
-                )
-
-            # Collect all Edit controls within the stacked widget (recursive).
-            # Structure: stacked > GroupBox > GroupBox > [GroupBox>Edit, GroupBox>Edit]
-            edits_in_tab = stacked.descendants(control_type="Edit")
-
-            if len(edits_in_tab) < 2:
-                return error_response(
-                    ErrorCode.UI_ELEMENT_NOT_FOUND,
-                    f"Expected at least 2 edit fields in Service tab, found {len(edits_in_tab)}",
-                )
-
-            url_field = edits_in_tab[0]
-            key_field = edits_in_tab[1]
-
             if server is not None:
-                url_field.click_input()
-                url_field.type_keys("^a", pause=0.05)
-                url_field.type_keys(server, with_spaces=True, pause=0.02)
-                time.sleep(self._ACTION_DELAY)
+                err = _set_field(url_field, server)
+                if err:
+                    return err
 
             if stream_key is not None:
-                key_field.click_input()
-                key_field.type_keys("^a", pause=0.05)
-                key_field.type_keys(stream_key, with_spaces=True, pause=0.02)
-                time.sleep(self._ACTION_DELAY)
+                err = _set_field(key_field, stream_key)
+                if err:
+                    return err
 
         return None  # Success
 
@@ -568,6 +555,16 @@ class OBSUIController:
                 time.sleep(self._ACTION_DELAY)
             except Exception as e:
                 return error_response(ErrorCode.UI_AUTOMATION_FAILED, f"Failed to click Delete: {e}")
+
+            # The plugin shows a "Question" confirmation dialog — click Yes.
+            try:
+                msgbox = obs.child_window(title="Question", class_name="QMessageBox")
+                if msgbox.exists(timeout=2):
+                    yes_btn = msgbox.child_window(title="Yes", class_name="QPushButton")
+                    yes_btn.click_input()
+                    time.sleep(self._ACTION_DELAY)
+            except Exception:
+                pass  # No confirmation dialog appeared, deletion may have proceeded
 
             # Verify removal
             time.sleep(0.5)
