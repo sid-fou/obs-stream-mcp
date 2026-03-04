@@ -217,6 +217,257 @@ class OBSController:
             return error_response(code, msg)
 
     # ------------------------------------------------------------------
+    # Source / scene item management (Phase 2)
+    # ------------------------------------------------------------------
+
+    def _validate_scene(self, scene_name: str) -> dict[str, Any] | None:
+        """Return an error response if the scene does not exist, else None."""
+        try:
+            resp = self._client.get_scene_list()  # type: ignore[union-attr]
+            existing = {s["sceneName"] for s in resp.scenes}
+            if scene_name not in existing:
+                return error_response(
+                    ErrorCode.SCENE_NOT_FOUND,
+                    f"Scene '{scene_name}' not found",
+                )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+        return None
+
+    def _get_scene_item_id(
+        self, scene_name: str, source_name: str
+    ) -> int | None:
+        """Return the scene item ID for a source in a scene, or None."""
+        try:
+            resp = self._client.get_scene_item_id(scene_name, source_name)  # type: ignore[union-attr]
+            return resp.scene_item_id
+        except Exception:
+            return None
+
+    def _validate_input_kind(self, source_type: str) -> dict[str, Any] | None:
+        """Return an error response if the input kind is invalid, else None."""
+        try:
+            resp = self._client.get_input_kind_list(False)  # type: ignore[union-attr]
+            if source_type not in resp.input_kinds:
+                return error_response(
+                    ErrorCode.INVALID_SOURCE_TYPE,
+                    f"Invalid source type '{source_type}'. "
+                    f"Available: {resp.input_kinds}",
+                )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+        return None
+
+    def add_source(
+        self,
+        scene_name: str,
+        source_name: str,
+        source_type: str,
+        source_settings: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Add a new source (input) to a scene.
+
+        Validates scene existence, input kind, and duplicate source name.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        for param, val in [("scene_name", scene_name), ("source_name", source_name), ("source_type", source_type)]:
+            if not val or not val.strip():
+                return error_response(ErrorCode.INVALID_PARAMETER, f"{param} must not be empty")
+
+        err = self._validate_scene(scene_name)
+        if err:
+            return err
+
+        err = self._validate_input_kind(source_type)
+        if err:
+            return err
+
+        # Check for duplicate source name in this scene.
+        if self._get_scene_item_id(scene_name, source_name) is not None:
+            return error_response(
+                ErrorCode.DUPLICATE_SOURCE,
+                f"Source '{source_name}' already exists in scene '{scene_name}'",
+            )
+
+        try:
+            resp = self._client.create_input(  # type: ignore[union-attr]
+                scene_name,
+                source_name,
+                source_type,
+                source_settings or {},
+                enabled,
+            )
+            return success_response(
+                {
+                    "scene_name": scene_name,
+                    "source_name": source_name,
+                    "source_type": source_type,
+                    "scene_item_id": resp.scene_item_id,
+                }
+            )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    def remove_source(self, scene_name: str, source_name: str) -> dict[str, Any]:
+        """Remove a source from a scene by name.
+
+        Validates scene and source existence before removal.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        for param, val in [("scene_name", scene_name), ("source_name", source_name)]:
+            if not val or not val.strip():
+                return error_response(ErrorCode.INVALID_PARAMETER, f"{param} must not be empty")
+
+        err = self._validate_scene(scene_name)
+        if err:
+            return err
+
+        item_id = self._get_scene_item_id(scene_name, source_name)
+        if item_id is None:
+            return error_response(
+                ErrorCode.SOURCE_NOT_FOUND,
+                f"Source '{source_name}' not found in scene '{scene_name}'",
+            )
+
+        try:
+            self._client.remove_scene_item(scene_name, item_id)  # type: ignore[union-attr]
+            return success_response(
+                {
+                    "scene_name": scene_name,
+                    "source_name": source_name,
+                    "removed_item_id": item_id,
+                }
+            )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    def get_source_list(self, scene_name: str) -> dict[str, Any]:
+        """List all sources (scene items) in a scene."""
+        if not self._require_connection():
+            return self._not_connected()
+
+        if not scene_name or not scene_name.strip():
+            return error_response(ErrorCode.INVALID_PARAMETER, "scene_name must not be empty")
+
+        err = self._validate_scene(scene_name)
+        if err:
+            return err
+
+        try:
+            resp = self._client.get_scene_item_list(scene_name)  # type: ignore[union-attr]
+            sources = [
+                {
+                    "source_name": item["sourceName"],
+                    "source_type": item.get("inputKind"),
+                    "scene_item_id": item["sceneItemId"],
+                    "enabled": item["sceneItemEnabled"],
+                    "locked": item["sceneItemLocked"],
+                }
+                for item in resp.scene_items
+            ]
+            return success_response(
+                {
+                    "scene_name": scene_name,
+                    "sources": sources,
+                }
+            )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    def set_source_transform(
+        self, scene_name: str, source_name: str, transform: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Set transform properties on a source in a scene.
+
+        Only provided keys are updated. Validates scene and source existence.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        for param, val in [("scene_name", scene_name), ("source_name", source_name)]:
+            if not val or not val.strip():
+                return error_response(ErrorCode.INVALID_PARAMETER, f"{param} must not be empty")
+
+        if not transform:
+            return error_response(ErrorCode.INVALID_PARAMETER, "transform must not be empty")
+
+        err = self._validate_scene(scene_name)
+        if err:
+            return err
+
+        item_id = self._get_scene_item_id(scene_name, source_name)
+        if item_id is None:
+            return error_response(
+                ErrorCode.SOURCE_NOT_FOUND,
+                f"Source '{source_name}' not found in scene '{scene_name}'",
+            )
+
+        try:
+            self._client.set_scene_item_transform(scene_name, item_id, transform)  # type: ignore[union-attr]
+            # Read back the applied transform.
+            updated = self._client.get_scene_item_transform(scene_name, item_id)  # type: ignore[union-attr]
+            return success_response(
+                {
+                    "scene_name": scene_name,
+                    "source_name": source_name,
+                    "scene_item_id": item_id,
+                    "transform": updated.scene_item_transform,
+                }
+            )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    def set_source_visibility(
+        self, scene_name: str, source_name: str, visible: bool
+    ) -> dict[str, Any]:
+        """Show or hide a source in a scene.
+
+        Validates scene and source existence before toggling.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        for param, val in [("scene_name", scene_name), ("source_name", source_name)]:
+            if not val or not val.strip():
+                return error_response(ErrorCode.INVALID_PARAMETER, f"{param} must not be empty")
+
+        err = self._validate_scene(scene_name)
+        if err:
+            return err
+
+        item_id = self._get_scene_item_id(scene_name, source_name)
+        if item_id is None:
+            return error_response(
+                ErrorCode.SOURCE_NOT_FOUND,
+                f"Source '{source_name}' not found in scene '{scene_name}'",
+            )
+
+        try:
+            self._client.set_scene_item_enabled(scene_name, item_id, visible)  # type: ignore[union-attr]
+            return success_response(
+                {
+                    "scene_name": scene_name,
+                    "source_name": source_name,
+                    "scene_item_id": item_id,
+                    "visible": visible,
+                }
+            )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

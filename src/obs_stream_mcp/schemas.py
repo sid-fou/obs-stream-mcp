@@ -57,3 +57,134 @@ STOP_STREAM_SCHEMA: dict = {
     "properties": {},
     "additionalProperties": False,
 }
+
+# ---------------------------------------------------------------------------
+# Phase 2: Source / scene item schemas
+# ---------------------------------------------------------------------------
+
+ADD_SOURCE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name of the scene to add the source to.",
+            "minLength": 1,
+        },
+        "source_name": {
+            "type": "string",
+            "description": "Unique name for the new source.",
+            "minLength": 1,
+        },
+        "source_type": {
+            "type": "string",
+            "description": (
+                "OBS input kind. Common types: image_source, color_source_v3, "
+                "browser_source, ffmpeg_source, text_gdiplus_v3, monitor_capture, "
+                "window_capture, game_capture, dshow_input."
+            ),
+            "minLength": 1,
+        },
+        "source_settings": {
+            "type": "object",
+            "description": (
+                "Optional input-specific settings as key-value pairs. "
+                "Example for image_source: {\"file\": \"C:/path/to/image.png\"}. "
+                "Example for browser_source: {\"url\": \"https://example.com\", \"width\": 1920, \"height\": 1080}. "
+                "Example for color_source_v3: {\"color\": 4278190335, \"width\": 1920, \"height\": 1080}."
+            ),
+            "additionalProperties": True,
+        },
+        "enabled": {
+            "type": "boolean",
+            "description": "Whether the source is visible when added. Defaults to true.",
+        },
+    },
+    "required": ["scene_name", "source_name", "source_type"],
+    "additionalProperties": False,
+}
+
+REMOVE_SOURCE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name of the scene containing the source.",
+            "minLength": 1,
+        },
+        "source_name": {
+            "type": "string",
+            "description": "Name of the source to remove.",
+            "minLength": 1,
+        },
+    },
+    "required": ["scene_name", "source_name"],
+    "additionalProperties": False,
+}
+
+GET_SOURCE_LIST_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name of the scene to list sources for.",
+            "minLength": 1,
+        },
+    },
+    "required": ["scene_name"],
+    "additionalProperties": False,
+}
+
+SET_SOURCE_TRANSFORM_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name of the scene containing the source.",
+            "minLength": 1,
+        },
+        "source_name": {
+            "type": "string",
+            "description": "Name of the source to transform.",
+            "minLength": 1,
+        },
+        "transform": {
+            "type": "object",
+            "description": (
+                "Transform properties to set. Supported keys: "
+                "positionX (float), positionY (float), "
+                "scaleX (float), scaleY (float), "
+                "rotation (float, degrees), "
+                "cropTop (int), cropBottom (int), cropLeft (int), cropRight (int), "
+                "boundsType (string, e.g. 'OBS_BOUNDS_STRETCH'), "
+                "boundsWidth (float), boundsHeight (float), "
+                "boundsAlignment (int). "
+                "Only provided keys are updated; others remain unchanged."
+            ),
+            "additionalProperties": True,
+        },
+    },
+    "required": ["scene_name", "source_name", "transform"],
+    "additionalProperties": False,
+}
+
+SET_SOURCE_VISIBILITY_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name of the scene containing the source.",
+            "minLength": 1,
+        },
+        "source_name": {
+            "type": "string",
+            "description": "Name of the source to show or hide.",
+            "minLength": 1,
+        },
+        "visible": {
+            "type": "boolean",
+            "description": "True to show the source, false to hide it.",
+        },
+    },
+    "required": ["scene_name", "source_name", "visible"],
+    "additionalProperties": False,
+}
