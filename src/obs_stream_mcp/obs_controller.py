@@ -378,6 +378,107 @@ class OBSController:
             return error_response(code, msg)
 
     # ------------------------------------------------------------------
+    # Broadcast / stream service settings (Phase 4)
+    # ------------------------------------------------------------------
+
+    # Service presets: service_type -> {ss_type, service, server, protocol}
+    _SERVICE_PRESETS: dict[str, dict[str, str]] = {
+        "youtube": {
+            "ss_type": "rtmp_common",
+            "service": "YouTube - RTMPS",
+            "server": "rtmps://a.rtmps.youtube.com:443/live2",
+            "protocol": "RTMPS",
+        },
+        "twitch": {
+            "ss_type": "rtmp_common",
+            "service": "Twitch",
+            "server": "rtmp://live.twitch.tv/app",
+            "protocol": "RTMP",
+        },
+        "kick": {
+            "ss_type": "rtmp_common",
+            "service": "Kick",
+            "server": "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
+            "protocol": "RTMPS",
+        },
+    }
+
+    def get_stream_settings(self) -> dict[str, Any]:
+        """Return current stream service settings.
+
+        Never exposes the stream key.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        try:
+            ss = self._client.get_stream_service_settings()  # type: ignore[union-attr]
+            settings = dict(ss.stream_service_settings)
+            # Redact stream key.
+            has_key = bool(settings.get("key"))
+            settings.pop("key", None)
+            return success_response(
+                {
+                    "service_type": ss.stream_service_type,
+                    "settings": settings,
+                    "stream_key_set": has_key,
+                }
+            )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    def set_stream_settings(
+        self,
+        service: str | None = None,
+        server: str | None = None,
+        stream_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Configure stream service settings.
+
+        Args:
+            service: Preset name ("youtube", "twitch", "kick") or None for custom.
+                     If None, server must be provided for custom RTMP.
+            server: Custom RTMP server URL. Required if service is None.
+            stream_key: Stream key. Falls back to OBS_STREAM_KEY env var.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        # Resolve stream key: parameter > env var.
+        key = stream_key or os.environ.get("OBS_STREAM_KEY", "")
+
+        # Determine service config.
+        if service and service.lower() in self._SERVICE_PRESETS:
+            preset = self._SERVICE_PRESETS[service.lower()]
+            ss_type = preset["ss_type"]
+            ss_settings: dict[str, Any] = {
+                "service": preset["service"],
+                "server": preset["server"],
+                "protocol": preset["protocol"],
+            }
+        elif server:
+            # Custom RTMP server.
+            ss_type = "rtmp_custom"
+            ss_settings = {"server": server}
+        else:
+            return error_response(
+                ErrorCode.INVALID_PARAMETER,
+                "Provide a service preset (youtube, twitch, kick) or a custom server URL.",
+            )
+
+        if key:
+            ss_settings["key"] = key
+
+        try:
+            self._client.set_stream_service_settings(ss_type, ss_settings)  # type: ignore[union-attr]
+            # Read back to confirm (without key).
+            return self.get_stream_settings()
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    # ------------------------------------------------------------------
     # Source / scene item management (Phase 2)
     # ------------------------------------------------------------------
 

@@ -286,3 +286,39 @@ LIST_DEVICES_SCHEMA: dict = {
     "properties": {},
     "additionalProperties": False,
 }
+
+
+GET_STREAM_SETTINGS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+SET_STREAM_SETTINGS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "service": {
+            "type": "string",
+            "description": (
+                "Streaming service preset: 'youtube', 'twitch', 'kick'. "
+                "Omit for custom RTMP server."
+            ),
+        },
+        "server": {
+            "type": "string",
+            "description": (
+                "Custom RTMP/RTMPS server URL. "
+                "Required if service is not provided. "
+                "Ignored if a service preset is used."
+            ),
+        },
+        "stream_key": {
+            "type": "string",
+            "description": (
+                "Stream key. If omitted, falls back to OBS_STREAM_KEY "
+                "environment variable."
+            ),
+        },
+    },
+    "additionalProperties": False,
+}
