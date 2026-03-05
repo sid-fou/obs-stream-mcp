@@ -87,6 +87,60 @@ _CLUSTER_TOOLS: list[Tool] = [
 ]
 
 
+# ------------------------------------------------------------------
+# Remote tool prefix helpers
+# ------------------------------------------------------------------
+
+_REMOTE_PREFIX_SEP = "__"
+"""Separator between node name and tool name in prefixed remote tools.
+
+Example: streaming_pc__obs_connect → node='streaming-pc', tool='obs_connect'
+"""
+
+
+def _node_to_prefix(node_name: str) -> str:
+    """Convert a node name like 'streaming-pc' to a safe tool prefix 'streaming_pc'."""
+    return node_name.replace("-", "_").replace(".", "_")
+
+
+def _build_remote_tools(cluster_manager) -> list[Tool]:
+    """Generate prefixed Tool definitions for every base tool on each remote node.
+
+    For a node named 'streaming-pc' and a base tool 'obs_get_scene_list',
+    this produces a tool named 'streaming_pc__obs_get_scene_list' with the
+    same schema and a description noting it runs on that remote node.
+    """
+    remote_tools: list[Tool] = []
+    for node_name in cluster_manager._nodes:
+        prefix = _node_to_prefix(node_name)
+        for base_tool in _BASE_TOOLS:
+            remote_tools.append(Tool(
+                name=f"{prefix}{_REMOTE_PREFIX_SEP}{base_tool.name}",
+                description=f"[Remote: {node_name}] {base_tool.description}",
+                inputSchema=base_tool.inputSchema,
+            ))
+    return remote_tools
+
+
+def _parse_remote_tool(name: str, cluster_manager) -> tuple[str, str] | None:
+    """If *name* is a prefixed remote tool, return (node_name, original_tool).
+
+    Returns None if *name* is not a remote-prefixed tool.
+    """
+    if _REMOTE_PREFIX_SEP not in name:
+        return None
+    prefix, _, tool_name = name.partition(_REMOTE_PREFIX_SEP)
+    # Reverse-lookup: find the node whose prefix matches.
+    for node_name in cluster_manager._nodes:
+        if _node_to_prefix(node_name) == prefix:
+            return node_name, tool_name
+    return None
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
 def _json_text(data: dict[str, Any]) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, default=str))]
 
@@ -94,6 +148,10 @@ def _json_text(data: dict[str, Any]) -> list[TextContent]:
 async def _run_sync(func, *args):
     return await asyncio.to_thread(func, *args)
 
+
+# ------------------------------------------------------------------
+# Tool registration
+# ------------------------------------------------------------------
 
 def register_tools(
     server: Server,
@@ -103,10 +161,11 @@ def register_tools(
 ) -> None:
     orchestrator = SceneOrchestrator(controller)
 
-    # Build tool list: base tools + cluster tools (if manager provided).
+    # Build tool list: base + cluster management + prefixed remote tools.
     tools: list[Tool] = list(_BASE_TOOLS)
     if cluster_manager is not None:
         tools.extend(_CLUSTER_TOOLS)
+        tools.extend(_build_remote_tools(cluster_manager))
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -116,6 +175,17 @@ def register_tools(
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
         arguments = arguments or {}
 
+        # ------- Check for prefixed remote tool first -------
+        if cluster_manager is not None:
+            remote = _parse_remote_tool(name, cluster_manager)
+            if remote is not None:
+                node_name, tool_name = remote
+                result = await cluster_manager.remote_execute(
+                    node_name, tool_name, arguments or None,
+                )
+                return _json_text(result)
+
+        # ------- Local dispatch -------
         dispatch = {
             "obs_connect": lambda: _run_sync(controller.connect),
             "obs_get_status": lambda: _run_sync(controller.get_status),
