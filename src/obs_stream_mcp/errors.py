@@ -31,6 +31,14 @@ class ErrorCode(str, Enum):
     UI_AUTOMATION_FAILED = "UI_AUTOMATION_FAILED"
     STREAM_START_FAILED = "STREAM_START_FAILED"
 
+    # Cluster / distributed coordination error codes
+    NODE_NOT_FOUND = "NODE_NOT_FOUND"
+    NODE_UNREACHABLE = "NODE_UNREACHABLE"
+    REMOTE_TOOL_NOT_FOUND = "REMOTE_TOOL_NOT_FOUND"
+    REMOTE_EXECUTION_FAILED = "REMOTE_EXECUTION_FAILED"
+    CLUSTER_AUTH_FAILED = "CLUSTER_AUTH_FAILED"
+    CLUSTER_CONFIG_ERROR = "CLUSTER_CONFIG_ERROR"
+
 
 def error_response(code: ErrorCode, message: str) -> dict[str, Any]:
     """Build a structured error response."""

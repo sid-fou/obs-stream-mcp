@@ -41,9 +41,14 @@ from obs_stream_mcp.schemas import (
     STOP_RTMP_TARGET_SCHEMA,
     START_ALL_RTMP_TARGETS_SCHEMA,
     STOP_ALL_RTMP_TARGETS_SCHEMA,
+    # Cluster coordination schemas
+    CLUSTER_STATUS_SCHEMA,
+    CLUSTER_NODES_LIST_SCHEMA,
+    CLUSTER_NODE_STATUS_SCHEMA,
+    REMOTE_EXECUTE_SCHEMA,
 )
 
-TOOLS: list[Tool] = [
+_BASE_TOOLS: list[Tool] = [
     Tool(name="obs_connect", description="Connect to OBS WebSocket. Must be called before any other tool.", inputSchema=CONNECT_SCHEMA),
     Tool(name="obs_get_status", description="Get current OBS connection and streaming status.", inputSchema=GET_STATUS_SCHEMA),
     Tool(name="obs_health_check", description="Comprehensive OBS diagnostics: connection, streaming, recording, scene, version, latency.", inputSchema=HEALTH_CHECK_SCHEMA),
@@ -74,6 +79,13 @@ TOOLS: list[Tool] = [
     Tool(name="obs_stop_all_rtmp_targets", description="Stop all active RTMP targets. Requires confirmed=true.", inputSchema=STOP_ALL_RTMP_TARGETS_SCHEMA),
 ]
 
+_CLUSTER_TOOLS: list[Tool] = [
+    Tool(name="cluster_status", description="Check reachability of all cluster nodes. Shows online/offline status for each configured node.", inputSchema=CLUSTER_STATUS_SCHEMA),
+    Tool(name="cluster_nodes_list", description="List all configured cluster nodes with their host and port.", inputSchema=CLUSTER_NODES_LIST_SCHEMA),
+    Tool(name="cluster_node_status", description="Detailed status of a specific cluster node. Verifies: MCP reachable, OBS reachable, tool discovery.", inputSchema=CLUSTER_NODE_STATUS_SCHEMA),
+    Tool(name="remote_execute", description="Execute an MCP tool on a remote cluster node. Only allows existing MCP tools — no arbitrary commands.", inputSchema=REMOTE_EXECUTE_SCHEMA),
+]
+
 
 def _json_text(data: dict[str, Any]) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, default=str))]
@@ -83,12 +95,22 @@ async def _run_sync(func, *args):
     return await asyncio.to_thread(func, *args)
 
 
-def register_tools(server: Server, controller: OBSController, ui_controller=None) -> None:
+def register_tools(
+    server: Server,
+    controller: OBSController,
+    ui_controller=None,
+    cluster_manager=None,
+) -> None:
     orchestrator = SceneOrchestrator(controller)
+
+    # Build tool list: base tools + cluster tools (if manager provided).
+    tools: list[Tool] = list(_BASE_TOOLS)
+    if cluster_manager is not None:
+        tools.extend(_CLUSTER_TOOLS)
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
-        return TOOLS
+        return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
@@ -189,6 +211,21 @@ def register_tools(server: Server, controller: OBSController, ui_controller=None
                 "obs_stop_all_rtmp_targets": lambda: _run_sync(
                     ui_controller.stop_all_rtmp_targets,
                     arguments.get("confirmed", False),
+                ),
+            })
+
+        # Cluster coordination dispatch (only if cluster_manager is available)
+        if cluster_manager is not None:
+            dispatch.update({
+                "cluster_status": lambda: cluster_manager.cluster_status(),
+                "cluster_nodes_list": lambda: _run_sync(cluster_manager.cluster_nodes_list),
+                "cluster_node_status": lambda: cluster_manager.cluster_node_status(
+                    arguments.get("node", ""),
+                ),
+                "remote_execute": lambda: cluster_manager.remote_execute(
+                    arguments.get("node", ""),
+                    arguments.get("tool", ""),
+                    arguments.get("args"),
                 ),
             })
 
