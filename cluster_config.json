@@ -2,7 +2,7 @@
   "cluster_nodes": [
     {
       "name": "streaming-pc",
-      "host": "192.168.1.45",
+      "host": "192.168.1.65",
       "port": 8765
     }
   ]
