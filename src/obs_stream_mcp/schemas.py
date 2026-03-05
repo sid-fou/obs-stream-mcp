@@ -33,6 +33,23 @@ CREATE_SCENE_SCHEMA: dict = {
     "additionalProperties": False,
 }
 
+REMOVE_SCENE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name of the scene to remove.",
+            "minLength": 1,
+        },
+        "confirmed": {
+            "type": "boolean",
+            "description": "Must be true to confirm deletion. Prevents accidental removal.",
+        },
+    },
+    "required": ["scene_name"],
+    "additionalProperties": False,
+}
+
 SWITCH_SCENE_SCHEMA: dict = {
     "type": "object",
     "properties": {

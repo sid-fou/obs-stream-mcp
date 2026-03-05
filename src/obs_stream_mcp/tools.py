@@ -18,6 +18,7 @@ from obs_stream_mcp.schemas import (
     BUILD_STARTING_SOON_SCENE_SCHEMA,
     CONNECT_SCHEMA,
     CREATE_SCENE_SCHEMA,
+    REMOVE_SCENE_SCHEMA,
     GET_SCENE_LIST_SCHEMA,
     GET_SOURCE_LIST_SCHEMA,
     GET_STATUS_SCHEMA,
@@ -55,6 +56,7 @@ _BASE_TOOLS: list[Tool] = [
     Tool(name="obs_list_devices", description="List available video and audio devices to prevent device name guessing.", inputSchema=LIST_DEVICES_SCHEMA),
     Tool(name="obs_get_scene_list", description="List all scenes and the current active program scene.", inputSchema=GET_SCENE_LIST_SCHEMA),
     Tool(name="obs_create_scene", description="Create a new empty scene in OBS.", inputSchema=CREATE_SCENE_SCHEMA),
+    Tool(name="obs_remove_scene", description="Remove a scene from OBS. Cannot remove the active program scene. Requires confirmed=true.", inputSchema=REMOVE_SCENE_SCHEMA),
     Tool(name="obs_switch_scene", description="Switch the active program scene.", inputSchema=SWITCH_SCENE_SCHEMA),
     Tool(name="obs_get_stream_settings", description="Get current stream service settings. Never exposes stream key.", inputSchema=GET_STREAM_SETTINGS_SCHEMA),
     Tool(name="obs_set_stream_settings", description="Configure stream service. Presets: youtube, twitch, kick. Or provide custom server URL. Stream key from parameter or OBS_STREAM_KEY env var.", inputSchema=SET_STREAM_SETTINGS_SCHEMA),
@@ -193,6 +195,7 @@ def register_tools(
             "obs_list_devices": lambda: _run_sync(controller.list_devices),
             "obs_get_scene_list": lambda: _run_sync(controller.get_scene_list),
             "obs_create_scene": lambda: _run_sync(controller.create_scene, arguments.get("scene_name", "")),
+            "obs_remove_scene": lambda: _run_sync(controller.remove_scene, arguments.get("scene_name", ""), arguments.get("confirmed", False)),
             "obs_switch_scene": lambda: _run_sync(controller.switch_scene, arguments.get("scene_name", "")),
             "obs_get_stream_settings": lambda: _run_sync(controller.get_stream_settings),
             "obs_set_stream_settings": lambda: _run_sync(

@@ -291,6 +291,52 @@ class OBSController:
             code, msg = classify_obs_error(exc)
             return error_response(code, msg)
 
+    def remove_scene(self, scene_name: str, confirmed: bool = False) -> dict[str, Any]:
+        """Remove a scene from OBS.
+
+        Requires confirmed=true to prevent accidental deletion.
+        Returns SCENE_NOT_FOUND if the scene does not exist.
+        Cannot remove the current program scene.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        if not scene_name or not scene_name.strip():
+            return error_response(
+                ErrorCode.INVALID_PARAMETER, "scene_name must not be empty"
+            )
+
+        if not confirmed:
+            return error_response(
+                ErrorCode.CONFIRMATION_REQUIRED,
+                f"Set confirmed=true to remove scene '{scene_name}'",
+            )
+
+        # Validate scene exists and is not the current program scene.
+        try:
+            resp = self._client.get_scene_list()  # type: ignore[union-attr]
+            existing = {s["sceneName"] for s in resp.scenes}
+            if scene_name not in existing:
+                return error_response(
+                    ErrorCode.SCENE_NOT_FOUND,
+                    f"Scene '{scene_name}' not found",
+                )
+            if resp.current_program_scene_name == scene_name:
+                return error_response(
+                    ErrorCode.INVALID_PARAMETER,
+                    f"Cannot remove the active program scene '{scene_name}'. Switch to another scene first.",
+                )
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+        try:
+            self._client.remove_scene(scene_name)  # type: ignore[union-attr]
+            return success_response({"scene_name": scene_name, "removed": True})
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
     def switch_scene(self, scene_name: str) -> dict[str, Any]:
         """Switch the active program scene.
 
