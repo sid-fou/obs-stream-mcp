@@ -1,8 +1,8 @@
 {
   "cluster_nodes": [
     {
-      "name": "gaming-pc",
-      "host": "192.168.1.2",
+      "name": "streaming-pc",
+      "host": "192.168.1.x",
       "port": 8765
     }
   ]
