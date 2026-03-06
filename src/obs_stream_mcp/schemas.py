@@ -33,6 +33,23 @@ CREATE_SCENE_SCHEMA: dict = {
     "additionalProperties": False,
 }
 
+REMOVE_SCENE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Name of the scene to remove.",
+            "minLength": 1,
+        },
+        "confirmed": {
+            "type": "boolean",
+            "description": "Must be true to confirm deletion. Prevents accidental removal.",
+        },
+    },
+    "required": ["scene_name"],
+    "additionalProperties": False,
+}
+
 SWITCH_SCENE_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -450,5 +467,55 @@ STOP_ALL_RTMP_TARGETS_SCHEMA: dict = {
             "description": "Must be true to stop all targets. Prevents accidental stops.",
         },
     },
+    "additionalProperties": False,
+}
+
+
+# ------------------------------------------------------------------
+# Cluster coordination schemas
+# ------------------------------------------------------------------
+
+CLUSTER_STATUS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+CLUSTER_NODES_LIST_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+CLUSTER_NODE_STATUS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "node": {
+            "type": "string",
+            "description": "Name of the cluster node to check.",
+        },
+    },
+    "required": ["node"],
+    "additionalProperties": False,
+}
+
+REMOTE_EXECUTE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "node": {
+            "type": "string",
+            "description": "Name of the remote cluster node (e.g. 'streaming-pc').",
+        },
+        "tool": {
+            "type": "string",
+            "description": "Name of the MCP tool to execute on the remote node.",
+        },
+        "args": {
+            "type": "object",
+            "description": "Arguments to pass to the remote tool.",
+            "additionalProperties": True,
+        },
+    },
+    "required": ["node", "tool"],
     "additionalProperties": False,
 }

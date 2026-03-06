@@ -1,0 +1,9 @@
+{
+  "cluster_nodes": [
+    {
+      "name": "streaming-pc",
+      "host": "192.168.1.x",
+      "port": 8765
+    }
+  ]
+}

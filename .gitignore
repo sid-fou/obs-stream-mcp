@@ -23,3 +23,6 @@ close_dialog.py
 check_deps.py
 test_*.py
 run_test.py
+
+# Local cluster config (contains IPs — use cluster_config.example.json as template)
+cluster_config.json

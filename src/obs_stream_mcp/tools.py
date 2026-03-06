@@ -18,6 +18,7 @@ from obs_stream_mcp.schemas import (
     BUILD_STARTING_SOON_SCENE_SCHEMA,
     CONNECT_SCHEMA,
     CREATE_SCENE_SCHEMA,
+    REMOVE_SCENE_SCHEMA,
     GET_SCENE_LIST_SCHEMA,
     GET_SOURCE_LIST_SCHEMA,
     GET_STATUS_SCHEMA,
@@ -41,15 +42,21 @@ from obs_stream_mcp.schemas import (
     STOP_RTMP_TARGET_SCHEMA,
     START_ALL_RTMP_TARGETS_SCHEMA,
     STOP_ALL_RTMP_TARGETS_SCHEMA,
+    # Cluster coordination schemas
+    CLUSTER_STATUS_SCHEMA,
+    CLUSTER_NODES_LIST_SCHEMA,
+    CLUSTER_NODE_STATUS_SCHEMA,
+    REMOTE_EXECUTE_SCHEMA,
 )
 
-TOOLS: list[Tool] = [
+_BASE_TOOLS: list[Tool] = [
     Tool(name="obs_connect", description="Connect to OBS WebSocket. Must be called before any other tool.", inputSchema=CONNECT_SCHEMA),
     Tool(name="obs_get_status", description="Get current OBS connection and streaming status.", inputSchema=GET_STATUS_SCHEMA),
     Tool(name="obs_health_check", description="Comprehensive OBS diagnostics: connection, streaming, recording, scene, version, latency.", inputSchema=HEALTH_CHECK_SCHEMA),
     Tool(name="obs_list_devices", description="List available video and audio devices to prevent device name guessing.", inputSchema=LIST_DEVICES_SCHEMA),
     Tool(name="obs_get_scene_list", description="List all scenes and the current active program scene.", inputSchema=GET_SCENE_LIST_SCHEMA),
     Tool(name="obs_create_scene", description="Create a new empty scene in OBS.", inputSchema=CREATE_SCENE_SCHEMA),
+    Tool(name="obs_remove_scene", description="Remove a scene from OBS. Cannot remove the active program scene. Requires confirmed=true.", inputSchema=REMOVE_SCENE_SCHEMA),
     Tool(name="obs_switch_scene", description="Switch the active program scene.", inputSchema=SWITCH_SCENE_SCHEMA),
     Tool(name="obs_get_stream_settings", description="Get current stream service settings. Never exposes stream key.", inputSchema=GET_STREAM_SETTINGS_SCHEMA),
     Tool(name="obs_set_stream_settings", description="Configure stream service. Presets: youtube, twitch, kick. Or provide custom server URL. Stream key from parameter or OBS_STREAM_KEY env var.", inputSchema=SET_STREAM_SETTINGS_SCHEMA),
@@ -74,6 +81,67 @@ TOOLS: list[Tool] = [
     Tool(name="obs_stop_all_rtmp_targets", description="Stop all active RTMP targets. Requires confirmed=true.", inputSchema=STOP_ALL_RTMP_TARGETS_SCHEMA),
 ]
 
+_CLUSTER_TOOLS: list[Tool] = [
+    Tool(name="cluster_status", description="Check reachability of all cluster nodes. Shows online/offline status for each configured node.", inputSchema=CLUSTER_STATUS_SCHEMA),
+    Tool(name="cluster_nodes_list", description="List all configured cluster nodes with their host and port.", inputSchema=CLUSTER_NODES_LIST_SCHEMA),
+    Tool(name="cluster_node_status", description="Detailed status of a specific cluster node. Verifies: MCP reachable, OBS reachable, tool discovery.", inputSchema=CLUSTER_NODE_STATUS_SCHEMA),
+    Tool(name="remote_execute", description="Execute an MCP tool on a remote cluster node. Only allows existing MCP tools — no arbitrary commands.", inputSchema=REMOTE_EXECUTE_SCHEMA),
+]
+
+
+# ------------------------------------------------------------------
+# Remote tool prefix helpers
+# ------------------------------------------------------------------
+
+_REMOTE_PREFIX_SEP = "__"
+"""Separator between node name and tool name in prefixed remote tools.
+
+Example: streaming_pc__obs_connect → node='streaming-pc', tool='obs_connect'
+"""
+
+
+def _node_to_prefix(node_name: str) -> str:
+    """Convert a node name like 'streaming-pc' to a safe tool prefix 'streaming_pc'."""
+    return node_name.replace("-", "_").replace(".", "_")
+
+
+def _build_remote_tools(cluster_manager) -> list[Tool]:
+    """Generate prefixed Tool definitions for every base tool on each remote node.
+
+    For a node named 'streaming-pc' and a base tool 'obs_get_scene_list',
+    this produces a tool named 'streaming_pc__obs_get_scene_list' with the
+    same schema and a description noting it runs on that remote node.
+    """
+    remote_tools: list[Tool] = []
+    for node_name in cluster_manager._nodes:
+        prefix = _node_to_prefix(node_name)
+        for base_tool in _BASE_TOOLS:
+            remote_tools.append(Tool(
+                name=f"{prefix}{_REMOTE_PREFIX_SEP}{base_tool.name}",
+                description=f"[Remote: {node_name}] {base_tool.description}",
+                inputSchema=base_tool.inputSchema,
+            ))
+    return remote_tools
+
+
+def _parse_remote_tool(name: str, cluster_manager) -> tuple[str, str] | None:
+    """If *name* is a prefixed remote tool, return (node_name, original_tool).
+
+    Returns None if *name* is not a remote-prefixed tool.
+    """
+    if _REMOTE_PREFIX_SEP not in name:
+        return None
+    prefix, _, tool_name = name.partition(_REMOTE_PREFIX_SEP)
+    # Reverse-lookup: find the node whose prefix matches.
+    for node_name in cluster_manager._nodes:
+        if _node_to_prefix(node_name) == prefix:
+            return node_name, tool_name
+    return None
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
 
 def _json_text(data: dict[str, Any]) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, default=str))]
@@ -83,17 +151,43 @@ async def _run_sync(func, *args):
     return await asyncio.to_thread(func, *args)
 
 
-def register_tools(server: Server, controller: OBSController, ui_controller=None) -> None:
+# ------------------------------------------------------------------
+# Tool registration
+# ------------------------------------------------------------------
+
+def register_tools(
+    server: Server,
+    controller: OBSController,
+    ui_controller=None,
+    cluster_manager=None,
+) -> None:
     orchestrator = SceneOrchestrator(controller)
+
+    # Build tool list: base + cluster management + prefixed remote tools.
+    tools: list[Tool] = list(_BASE_TOOLS)
+    if cluster_manager is not None:
+        tools.extend(_CLUSTER_TOOLS)
+        tools.extend(_build_remote_tools(cluster_manager))
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
-        return TOOLS
+        return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
         arguments = arguments or {}
 
+        # ------- Check for prefixed remote tool first -------
+        if cluster_manager is not None:
+            remote = _parse_remote_tool(name, cluster_manager)
+            if remote is not None:
+                node_name, tool_name = remote
+                result = await cluster_manager.remote_execute(
+                    node_name, tool_name, arguments or None,
+                )
+                return _json_text(result)
+
+        # ------- Local dispatch -------
         dispatch = {
             "obs_connect": lambda: _run_sync(controller.connect),
             "obs_get_status": lambda: _run_sync(controller.get_status),
@@ -101,6 +195,7 @@ def register_tools(server: Server, controller: OBSController, ui_controller=None
             "obs_list_devices": lambda: _run_sync(controller.list_devices),
             "obs_get_scene_list": lambda: _run_sync(controller.get_scene_list),
             "obs_create_scene": lambda: _run_sync(controller.create_scene, arguments.get("scene_name", "")),
+            "obs_remove_scene": lambda: _run_sync(controller.remove_scene, arguments.get("scene_name", ""), arguments.get("confirmed", False)),
             "obs_switch_scene": lambda: _run_sync(controller.switch_scene, arguments.get("scene_name", "")),
             "obs_get_stream_settings": lambda: _run_sync(controller.get_stream_settings),
             "obs_set_stream_settings": lambda: _run_sync(
@@ -189,6 +284,21 @@ def register_tools(server: Server, controller: OBSController, ui_controller=None
                 "obs_stop_all_rtmp_targets": lambda: _run_sync(
                     ui_controller.stop_all_rtmp_targets,
                     arguments.get("confirmed", False),
+                ),
+            })
+
+        # Cluster coordination dispatch (only if cluster_manager is available)
+        if cluster_manager is not None:
+            dispatch.update({
+                "cluster_status": lambda: cluster_manager.cluster_status(),
+                "cluster_nodes_list": lambda: _run_sync(cluster_manager.cluster_nodes_list),
+                "cluster_node_status": lambda: cluster_manager.cluster_node_status(
+                    arguments.get("node", ""),
+                ),
+                "remote_execute": lambda: cluster_manager.remote_execute(
+                    arguments.get("node", ""),
+                    arguments.get("tool", ""),
+                    arguments.get("args"),
                 ),
             })
 
