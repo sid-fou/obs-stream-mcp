@@ -828,3 +828,347 @@ class OBSUIController:
                 "action": "stop_all",
                 "targets": targets,
             })
+
+    # ------------------------------------------------------------------
+    # Internal helpers: Teleport plugin
+    # ------------------------------------------------------------------
+
+    def _open_teleport_dialog(self, obs_win):
+        """Open Tools -> Teleport dialog in OBS.
+
+        Returns the dialog wrapper, or None if it could not be opened.
+        The dialog is a child window of OBS (not top-level).
+        """
+        # Open Tools menu via menu bar, then click Teleport
+        try:
+            obs_win.set_focus()
+            time.sleep(self._ACTION_DELAY)
+
+            menu_bars = obs_win.children(control_type="MenuBar")
+            if not menu_bars:
+                return None
+            mb = menu_bars[0]
+            tools_item = None
+            for child in mb.children():
+                if child.window_text() == "Tools":
+                    tools_item = child
+                    break
+            if tools_item is None:
+                return None
+            tools_item.click_input()
+            time.sleep(0.8)
+
+            # Find and click "Teleport" in the expanded menu
+            for mi in obs_win.descendants(control_type="MenuItem"):
+                if mi.window_text() == "Teleport":
+                    mi.click_input()
+                    break
+            time.sleep(0.8)
+        except Exception:
+            return None
+
+        # The dialog title is "Properties for 'Teleport'", class OBSBasicProperties
+        deadline = time.time() + self._ELEMENT_TIMEOUT
+        while time.time() < deadline:
+            try:
+                dlg = obs_win.child_window(
+                    title="Properties for 'Teleport'",
+                    class_name="OBSBasicProperties",
+                )
+                if dlg.exists():
+                    return dlg
+            except Exception:
+                pass
+            time.sleep(0.3)
+        return None
+
+    def _find_teleport_controls(self, dialog):
+        """Map the Teleport dialog controls by descendant index.
+
+        Returns a dict with keys: enabled_checkbox, identifier_edit, ok_button
+        or None if controls could not be found.
+
+        Dialog control map (from discovery):
+          [9]  CheckBox: "Teleport Enabled"
+          [13] Edit: Identifier field
+          [15] UpDown: TCP Port
+          [17] Slider + [18] UpDown: Quality
+          OK button shifts index when warning text appears after enabling.
+        """
+        try:
+            descendants = dialog.descendants()
+        except Exception:
+            return None
+
+        controls = {}
+
+        # Find the "Teleport Enabled" checkbox
+        checkboxes = [d for d in descendants if d.element_info.control_type == "CheckBox"]
+        for cb in checkboxes:
+            try:
+                if "Teleport" in cb.window_text() or "Enable" in cb.window_text().lower():
+                    controls["enabled_checkbox"] = cb
+                    break
+            except Exception:
+                continue
+
+        # Find edit fields — there's typically only one (Identifier)
+        edits = [d for d in descendants if d.element_info.control_type == "Edit"]
+        if edits:
+            controls["identifier_edit"] = edits[0]
+
+        # Find UpDown/Spinner controls (port, quality)
+        spinners = [d for d in descendants if d.element_info.control_type == "Spinner"]
+        if len(spinners) >= 1:
+            controls["port_spinner"] = spinners[0]
+        if len(spinners) >= 2:
+            controls["quality_spinner"] = spinners[1]
+
+        # Find OK button — look for QPushButton with text "OK"
+        buttons = [d for d in descendants if d.element_info.control_type == "Button"]
+        for btn in buttons:
+            try:
+                if btn.window_text() == "OK":
+                    controls["ok_button"] = btn
+                    break
+            except Exception:
+                continue
+
+        # Also find Cancel for cleanup
+        for btn in buttons:
+            try:
+                if btn.window_text() == "Cancel":
+                    controls["cancel_button"] = btn
+                    break
+            except Exception:
+                continue
+
+        return controls
+
+    def _handle_settings_changed_dialog(self, obs_win, action: str = "save"):
+        """Handle the 'Settings changed' confirmation dialog if it appears.
+
+        OBS shows this QMessageBox when the Teleport dialog is closed
+        without clicking OK (e.g. via ESC or window close).
+        Buttons: Save / Discard / Cancel.
+
+        Args:
+            obs_win: The OBS main window handle.
+            action: 'save' to click Save, 'discard' to click Discard.
+        """
+        time.sleep(0.3)
+        target_text = "Save" if action == "save" else "Discard"
+
+        # Try multiple approaches to find the dialog
+        dialog = None
+
+        # 1. As child of OBS main window
+        for title in ("Settings changed", "Settings Changed"):
+            try:
+                candidate = obs_win.child_window(title=title)
+                if candidate.exists(timeout=0.3):
+                    dialog = candidate
+                    break
+            except Exception:
+                continue
+
+        # 2. As top-level window
+        if dialog is None:
+            try:
+                desktop = Desktop(backend="uia")
+                for title in ("Settings changed", "Settings Changed"):
+                    try:
+                        candidate = desktop.window(title=title)
+                        if candidate.exists(timeout=0.3):
+                            dialog = candidate
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        if dialog is None:
+            return
+
+        # Click the target button
+        try:
+            buttons = dialog.children(control_type="Button")
+            for btn in buttons:
+                try:
+                    if btn.window_text() == target_text:
+                        btn.click_input()
+                        time.sleep(self._ACTION_DELAY)
+                        return
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _close_teleport_dialog_safely(self, dialog, obs):
+        """Close the Teleport dialog using OK/Enter. Never use ESC.
+
+        Using ESC triggers 'Settings changed' confirmation when changes
+        were made. OK/Enter saves and closes cleanly.
+        """
+        import pywinauto.keyboard as kb
+        # Try clicking OK button first
+        try:
+            for desc in dialog.descendants():
+                try:
+                    if (desc.element_info.control_type == "Button"
+                            and desc.window_text() == "OK"):
+                        desc.click_input()
+                        time.sleep(0.5)
+                        return
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        # Fallback: Enter key
+        try:
+            kb.send_keys("{ENTER}")
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+    def _teleport_configure_attempt(self, obs, enabled, identifier, port, quality):
+        """Single attempt to configure Teleport. Returns response dict or None on transient error."""
+        dialog = self._open_teleport_dialog(obs)
+        if dialog is None:
+            return error_response(
+                ErrorCode.TELEPORT_PLUGIN_NOT_FOUND,
+                "Could not open Teleport dialog. Is the Teleport plugin installed?",
+            )
+
+        # Find controls — retry a few times for COM settling
+        controls = None
+        for _ in range(3):
+            try:
+                controls = self._find_teleport_controls(dialog)
+                if controls and "enabled_checkbox" in controls:
+                    controls["enabled_checkbox"].get_toggle_state()
+                    break
+            except Exception:
+                controls = None
+                time.sleep(0.5)
+
+        if controls is None or "enabled_checkbox" not in controls:
+            self._close_teleport_dialog_safely(dialog, obs)
+            return error_response(
+                ErrorCode.TELEPORT_DIALOG_FAILED,
+                "Could not locate Teleport dialog controls",
+            )
+
+        try:
+            return self._apply_teleport_settings(
+                dialog, controls, obs, enabled, identifier, port, quality,
+            )
+        except Exception:
+            # COM/transient error — close dialog safely (OK, not ESC)
+            # and return None to signal retry
+            self._close_teleport_dialog_safely(dialog, obs)
+            time.sleep(0.5)
+            return None
+
+    def _apply_teleport_settings(self, dialog, controls, obs,
+                                 enabled, identifier, port, quality):
+        """Apply settings to the open Teleport dialog and click OK."""
+        # Toggle checkbox — state 0 = unchecked, nonzero = checked
+        cb = controls["enabled_checkbox"]
+        current_state = cb.get_toggle_state()
+        if enabled and current_state == 0:
+            cb.click_input()
+            time.sleep(self._ACTION_DELAY)
+        elif not enabled and current_state != 0:
+            cb.click_input()
+            time.sleep(self._ACTION_DELAY)
+
+        # Set identifier
+        if "identifier_edit" in controls and identifier:
+            edit = controls["identifier_edit"]
+            edit.click_input()
+            time.sleep(0.1)
+            edit.type_keys("^a", pause=0.05)
+            edit.type_keys(identifier, with_spaces=True, pause=0.02)
+            time.sleep(self._ACTION_DELAY)
+
+        # Set port via spinner (best-effort)
+        if "port_spinner" in controls:
+            try:
+                spinner = controls["port_spinner"]
+                spinner.click_input()
+                time.sleep(0.1)
+                spinner.type_keys("^a", pause=0.05)
+                spinner.type_keys(str(port), pause=0.02)
+                time.sleep(self._ACTION_DELAY)
+            except Exception:
+                pass
+
+        # Set quality via spinner (best-effort, skip if default)
+        if "quality_spinner" in controls and quality != 90:
+            try:
+                spinner = controls["quality_spinner"]
+                spinner.click_input()
+                time.sleep(0.1)
+                spinner.type_keys("^a", pause=0.05)
+                spinner.type_keys(str(quality), pause=0.02)
+                time.sleep(self._ACTION_DELAY)
+            except Exception:
+                pass
+
+        # Click OK — always use fresh descendants scan since checkbox
+        # toggle adds a warning label that shifts button indices
+        self._close_teleport_dialog_safely(dialog, obs)
+
+        return success_response({
+            "teleport_enabled": enabled,
+            "identifier": identifier,
+            "port": port,
+            "quality": quality,
+            "configured": True,
+        })
+
+    # ------------------------------------------------------------------
+    # Public API: Teleport plugin
+    # ------------------------------------------------------------------
+
+    def teleport_configure_host(
+        self,
+        enabled: bool = True,
+        identifier: str = "OBSTeleport",
+        port: int = 0,
+        quality: int = 90,
+    ) -> dict[str, Any]:
+        """Configure the Teleport output on the host machine.
+
+        Opens Tools -> Teleport dialog, sets enabled state, identifier,
+        port, and quality, then clicks OK.
+        Retries the entire operation up to 3 times to handle transient
+        COM/UIA errors that occur when OBS dialogs are still settling.
+        """
+        if not 0 <= port <= 65535:
+            return error_response(ErrorCode.INVALID_PARAMETER, f"port must be 0-65535, got {port}")
+        if not 1 <= quality <= 100:
+            return error_response(ErrorCode.INVALID_PARAMETER, f"quality must be 1-100, got {quality}")
+
+        with self._lock:
+            obs = self._find_obs_window()
+            if obs is None:
+                return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+
+            last_error = ""
+            for attempt in range(3):
+                if attempt > 0:
+                    time.sleep(1.0)
+
+                result = self._teleport_configure_attempt(
+                    obs, enabled, identifier, port, quality,
+                )
+                if result is not None:
+                    return result
+                last_error = f"Attempt {attempt + 1} hit transient COM error"
+
+            return error_response(
+                ErrorCode.TELEPORT_DIALOG_FAILED,
+                f"Failed to configure Teleport after 3 attempts: {last_error}",
+            )

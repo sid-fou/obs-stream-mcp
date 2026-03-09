@@ -499,6 +499,89 @@ CLUSTER_NODE_STATUS_SCHEMA: dict = {
     "additionalProperties": False,
 }
 
+# ------------------------------------------------------------------
+# Phase 5 Extended: Teleport plugin automation schemas
+# ------------------------------------------------------------------
+
+TELEPORT_CONFIGURE_HOST_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "enabled": {
+            "type": "boolean",
+            "description": "Whether to enable or disable Teleport output. Defaults to true.",
+        },
+        "identifier": {
+            "type": "string",
+            "description": "Teleport host identifier that clients connect to. Defaults to 'OBSTeleport'.",
+        },
+        "port": {
+            "type": "integer",
+            "description": "TCP port for Teleport. 0 = auto (default). Range: 0-65535.",
+        },
+        "quality": {
+            "type": "integer",
+            "description": "JPEG quality for Teleport stream. Range: 1-100. Defaults to 90.",
+        },
+    },
+    "additionalProperties": False,
+}
+
+TELEPORT_CONFIGURE_CLIENT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "scene_name": {
+            "type": "string",
+            "description": "Scene to add the Teleport source to. Created if it doesn't exist.",
+            "minLength": 1,
+        },
+        "source_name": {
+            "type": "string",
+            "description": "Name for the Teleport source. Defaults to 'Teleport Feed'.",
+        },
+        "identifier": {
+            "type": "string",
+            "description": "Teleport host identifier to connect to. Must match the host's identifier.",
+            "minLength": 1,
+        },
+    },
+    "required": ["scene_name", "identifier"],
+    "additionalProperties": False,
+}
+
+TELEPORT_GET_STATUS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+SETUP_DUAL_PC_TELEPORT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "host_node": {
+            "type": "string",
+            "description": "Cluster node name for the Teleport host (sender). Defaults to 'gaming-pc'.",
+        },
+        "client_node": {
+            "type": "string",
+            "description": "Cluster node name for the Teleport client (receiver). Defaults to 'streaming-pc'.",
+        },
+        "identifier": {
+            "type": "string",
+            "description": "Teleport identifier. Defaults to 'OBSTeleport'.",
+        },
+        "scene_name": {
+            "type": "string",
+            "description": "Scene name on the client for the Teleport source. Defaults to 'Teleport Feed'.",
+        },
+        "quality": {
+            "type": "integer",
+            "description": "JPEG quality for Teleport stream. Defaults to 90.",
+        },
+    },
+    "additionalProperties": False,
+}
+
+
 REMOTE_EXECUTE_SCHEMA: dict = {
     "type": "object",
     "properties": {

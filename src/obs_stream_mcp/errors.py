@@ -39,6 +39,10 @@ class ErrorCode(str, Enum):
     CLUSTER_AUTH_FAILED = "CLUSTER_AUTH_FAILED"
     CLUSTER_CONFIG_ERROR = "CLUSTER_CONFIG_ERROR"
 
+    # Teleport plugin error codes
+    TELEPORT_PLUGIN_NOT_FOUND = "TELEPORT_PLUGIN_NOT_FOUND"
+    TELEPORT_DIALOG_FAILED = "TELEPORT_DIALOG_FAILED"
+
 
 def error_response(code: ErrorCode, message: str) -> dict[str, Any]:
     """Build a structured error response."""

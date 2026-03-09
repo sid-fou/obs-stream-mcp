@@ -790,3 +790,58 @@ class OBSController:
             ErrorCode.OBS_NOT_CONNECTED,
             "Not connected to OBS. Call obs_connect first.",
         )
+
+    # ------------------------------------------------------------------
+    # Teleport plugin status (WebSocket-based)
+    # ------------------------------------------------------------------
+
+    def teleport_get_status(self) -> dict[str, Any]:
+        """Check if the Teleport output exists and retrieve its settings.
+
+        Uses OBS WebSocket to query the output list and settings.
+        Does NOT require UI automation.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+
+        try:
+            outputs = self._client.get_output_list()
+            teleport_output = None
+            for out in outputs.outputs:
+                if out.get("outputName") == "Teleport" or out.get("outputKind") == "teleport-output":
+                    teleport_output = out
+                    break
+
+            if teleport_output is None:
+                return success_response({
+                    "teleport_available": False,
+                    "message": "Teleport output not found. Plugin may not be installed.",
+                })
+
+            # Try to get output settings
+            settings = {}
+            try:
+                resp = self._client.get_output_settings("Teleport")
+                settings = resp.output_settings or {}
+            except Exception:
+                pass
+
+            # Try to get output status (active/inactive)
+            active = False
+            try:
+                status = self._client.get_output_status("Teleport")
+                active = status.output_active
+            except Exception:
+                pass
+
+            return success_response({
+                "teleport_available": True,
+                "output_name": teleport_output.get("outputName", "Teleport"),
+                "output_kind": teleport_output.get("outputKind", "teleport-output"),
+                "active": active,
+                "settings": settings,
+            })
+
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
