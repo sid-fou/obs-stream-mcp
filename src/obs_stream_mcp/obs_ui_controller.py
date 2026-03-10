@@ -1187,10 +1187,28 @@ class OBSUIController:
                 )
 
     def _select_teleport_host_in_dialog(self, dialog, obs, identifier):
-        """Find the ComboBox in the properties dialog and select the host."""
+        """Find the ComboBox in the properties dialog and select the host.
+
+        Qt ComboBoxes don't expose items via standard UIA child queries.
+        When the combo is expanded, the dropdown ListItems appear as
+        descendants of the OBS main window. We also need to click
+        "Refresh List" first to discover available hosts.
+        """
         descendants = dialog.descendants()
 
-        # Find ComboBox controls
+        # Step 1: Click "Refresh List" button to discover hosts
+        for d in descendants:
+            try:
+                if (d.element_info.control_type == "Button"
+                        and d.window_text() == "Refresh List"):
+                    d.click_input()
+                    time.sleep(2.0)  # mDNS discovery needs time
+                    break
+            except Exception:
+                continue
+
+        # Step 2: Find the ComboBox
+        descendants = dialog.descendants()
         combos = [
             d for d in descendants
             if d.element_info.control_type == "ComboBox"
@@ -1201,61 +1219,57 @@ class OBSUIController:
                 ErrorCode.UI_ELEMENT_NOT_FOUND,
                 "No ComboBox found in Teleport source properties dialog",
             )
+        combo = combos[0]
 
-        # Find the combo that contains our identifier as an option,
-        # or the first combo if there's only one
-        target_combo = None
-        for combo in combos:
-            try:
-                # Expand to see items
-                combo.click_input()
-                time.sleep(0.3)
+        # Step 3: Expand the combo by clicking it
+        combo.click_input()
+        time.sleep(0.5)
 
-                # Check list items
-                items = combo.children(control_type="ListItem")
-                for item in items:
-                    item_text = item.window_text()
-                    if identifier in item_text:
-                        target_combo = combo
-                        # Click the matching item
-                        item.click_input()
-                        time.sleep(0.3)
-                        break
-
-                if target_combo is not None:
-                    break
-
-                # Collapse if not the right combo
-                combo.click_input()
-                time.sleep(0.2)
-            except Exception:
-                continue
-
-        if target_combo is None:
-            # Try alternate approach: select by text on the combo directly
-            for combo in combos:
+        # Step 4: Search OBS window descendants for ListItems matching
+        # the identifier. Prefer LAN IP (192.168.x.x) over localhost.
+        matching_items = []
+        try:
+            for d in obs.descendants():
                 try:
-                    combo.select(identifier)
-                    target_combo = combo
-                    break
+                    if (d.element_info.control_type == "ListItem"
+                            and identifier in d.window_text()):
+                        matching_items.append(d)
                 except Exception:
-                    pass
+                    continue
+        except Exception:
+            pass
 
-        if target_combo is None:
+        if not matching_items:
+            # Collapse combo and report failure
+            combo.click_input()
+            time.sleep(0.2)
             self._close_teleport_dialog_safely(dialog, obs)
             return error_response(
                 ErrorCode.UI_ELEMENT_NOT_FOUND,
-                f"Could not find '{identifier}' in any dropdown. "
-                "Host may not be discovered yet — ensure Teleport is "
-                "enabled on the host machine.",
+                f"'{identifier}' not found in dropdown. "
+                "Ensure Teleport is enabled on the host.",
             )
 
-        # Click OK
+        # Prefer LAN IP over localhost/other
+        best = matching_items[0]
+        for item in matching_items:
+            txt = item.window_text()
+            if "192.168." in txt or "10." in txt:
+                best = item
+                break
+
+        # Step 5: Click the matching ListItem
+        best.click_input()
+        time.sleep(0.5)
+        selected_text = best.window_text()
+
+        # Step 6: Click OK to save
         self._close_teleport_dialog_safely(dialog, obs)
 
         return success_response({
             "source_host_selected": True,
             "identifier": identifier,
+            "selected_host": selected_text,
         })
 
     # ------------------------------------------------------------------
