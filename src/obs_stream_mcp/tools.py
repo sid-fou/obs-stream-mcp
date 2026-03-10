@@ -209,14 +209,31 @@ def _teleport_configure_client(
     host_selected = False
     if ui_controller is not None:
         import time
-        # Open properties dialog via WebSocket
-        open_result = controller.open_input_properties_dialog(source_name)
-        if open_result["success"]:
-            time.sleep(0.8)  # Let dialog appear
-            select_result = ui_controller.teleport_select_source_host(
-                source_name, identifier,
-            )
-            host_selected = select_result.get("success", False)
+        if source_created:
+            # OBS auto-opens the properties dialog for new sources.
+            # Just wait for it to appear — do NOT call
+            # open_input_properties_dialog (it would conflict).
+            time.sleep(1.5)
+        else:
+            # Source already existed — explicitly open properties.
+            open_result = controller.open_input_properties_dialog(source_name)
+            if not open_result["success"]:
+                # Can't open dialog — return what we have
+                return success_response({
+                    "scene_name": scene_name,
+                    "source_name": source_name,
+                    "source_type": "teleport-source",
+                    "identifier": identifier,
+                    "source_created": source_created,
+                    "host_selected": False,
+                    "configured": True,
+                })
+            time.sleep(0.8)
+
+        select_result = ui_controller.teleport_select_source_host(
+            source_name, identifier,
+        )
+        host_selected = select_result.get("success", False)
 
     return success_response({
         "scene_name": scene_name,
