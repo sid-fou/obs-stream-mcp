@@ -9,7 +9,7 @@ from typing import Any
 from mcp.server import Server
 from mcp.types import TextContent, Tool
 
-from obs_stream_mcp.errors import ErrorCode, error_response
+from obs_stream_mcp.errors import ErrorCode, error_response, success_response
 from obs_stream_mcp.obs_controller import OBSController
 from obs_stream_mcp.orchestrator import SceneOrchestrator
 from obs_stream_mcp.schemas import (
@@ -47,6 +47,11 @@ from obs_stream_mcp.schemas import (
     CLUSTER_NODES_LIST_SCHEMA,
     CLUSTER_NODE_STATUS_SCHEMA,
     REMOTE_EXECUTE_SCHEMA,
+    # Teleport plugin schemas
+    TELEPORT_CONFIGURE_HOST_SCHEMA,
+    TELEPORT_CONFIGURE_CLIENT_SCHEMA,
+    TELEPORT_GET_STATUS_SCHEMA,
+    SETUP_DUAL_PC_TELEPORT_SCHEMA,
 )
 
 _BASE_TOOLS: list[Tool] = [
@@ -79,6 +84,10 @@ _BASE_TOOLS: list[Tool] = [
     Tool(name="obs_stop_rtmp_target", description="Stop streaming to a specific RTMP target. Requires confirmed=true.", inputSchema=STOP_RTMP_TARGET_SCHEMA),
     Tool(name="obs_start_all_rtmp_targets", description="Start all configured RTMP targets simultaneously.", inputSchema=START_ALL_RTMP_TARGETS_SCHEMA),
     Tool(name="obs_stop_all_rtmp_targets", description="Stop all active RTMP targets. Requires confirmed=true.", inputSchema=STOP_ALL_RTMP_TARGETS_SCHEMA),
+    # Teleport plugin tools
+    Tool(name="teleport_configure_host", description="Configure the OBS Teleport output on the host (sender) machine. Opens Tools -> Teleport dialog, sets enabled state, identifier, port, and quality via UI automation.", inputSchema=TELEPORT_CONFIGURE_HOST_SCHEMA),
+    Tool(name="teleport_configure_client", description="Add a Teleport source to a scene on the client (receiver) machine. Connects to the specified host identifier via the teleport-source input kind.", inputSchema=TELEPORT_CONFIGURE_CLIENT_SCHEMA),
+    Tool(name="teleport_get_status", description="Check if the OBS Teleport output exists and get its settings. Uses WebSocket — no UI automation required.", inputSchema=TELEPORT_GET_STATUS_SCHEMA),
 ]
 
 _CLUSTER_TOOLS: list[Tool] = [
@@ -86,6 +95,7 @@ _CLUSTER_TOOLS: list[Tool] = [
     Tool(name="cluster_nodes_list", description="List all configured cluster nodes with their host and port.", inputSchema=CLUSTER_NODES_LIST_SCHEMA),
     Tool(name="cluster_node_status", description="Detailed status of a specific cluster node. Verifies: MCP reachable, OBS reachable, tool discovery.", inputSchema=CLUSTER_NODE_STATUS_SCHEMA),
     Tool(name="remote_execute", description="Execute an MCP tool on a remote cluster node. Only allows existing MCP tools — no arbitrary commands.", inputSchema=REMOTE_EXECUTE_SCHEMA),
+    Tool(name="setup_dual_pc_teleport", description="Orchestrate full dual-PC Teleport setup: verify OBS on both nodes, configure host output on sender, add teleport-source on receiver, validate connection.", inputSchema=SETUP_DUAL_PC_TELEPORT_SCHEMA),
 ]
 
 
@@ -96,7 +106,7 @@ _CLUSTER_TOOLS: list[Tool] = [
 _REMOTE_PREFIX_SEP = "__"
 """Separator between node name and tool name in prefixed remote tools.
 
-Example: streaming_pc__obs_connect → node='streaming-pc', tool='obs_connect'
+Example: streaming_pc__obs_connect -> node='streaming-pc', tool='obs_connect'
 """
 
 
@@ -149,6 +159,128 @@ def _json_text(data: dict[str, Any]) -> list[TextContent]:
 
 async def _run_sync(func, *args):
     return await asyncio.to_thread(func, *args)
+
+
+def _teleport_configure_client(
+    controller: OBSController,
+    scene_name: str,
+    source_name: str,
+    identifier: str,
+) -> dict[str, Any]:
+    """Add a teleport-source to a scene on the client machine.
+
+    Creates the scene if it doesn't exist. Uses obs_add_source internally
+    with source_type='teleport-source' and teleport_list=identifier.
+    """
+    if not scene_name:
+        return error_response(ErrorCode.INVALID_PARAMETER, "scene_name must not be empty")
+    if not identifier:
+        return error_response(ErrorCode.INVALID_PARAMETER, "identifier must not be empty")
+
+    if not controller._require_connection():
+        return controller._not_connected()
+
+    # Create scene if needed (ignore DUPLICATE_SCENE error)
+    create_result = controller.create_scene(scene_name)
+    if not create_result["success"] and create_result.get("code") != ErrorCode.DUPLICATE_SCENE.value:
+        return create_result
+
+    # Add teleport-source
+    result = controller.add_source(
+        scene_name=scene_name,
+        source_name=source_name,
+        source_type="teleport-source",
+        source_settings={"teleport_list": identifier},
+        enabled=True,
+    )
+    if not result["success"]:
+        return result
+
+    return success_response({
+        "scene_name": scene_name,
+        "source_name": source_name,
+        "source_type": "teleport-source",
+        "identifier": identifier,
+        "configured": True,
+    })
+
+
+async def _setup_dual_pc_teleport(
+    cluster_manager,
+    host_node: str,
+    client_node: str,
+    identifier: str,
+    scene_name: str,
+    quality: int,
+) -> dict[str, Any]:
+    """Orchestrate full dual-PC Teleport setup across cluster nodes.
+
+    Steps:
+    1. Verify OBS is reachable on both nodes
+    2. Configure Teleport host on sender
+    3. Configure Teleport client on receiver
+    4. Validate by checking status on both nodes
+    """
+    if not cluster_manager:
+        return error_response(ErrorCode.CLUSTER_CONFIG_ERROR, "Cluster manager not available")
+
+    steps_completed = []
+    errors = []
+
+    # Step 1: Verify both nodes are reachable
+    for node in (host_node, client_node):
+        status = await cluster_manager.cluster_node_status(node)
+        if not status.get("success"):
+            return error_response(
+                ErrorCode.NODE_UNREACHABLE,
+                f"Node '{node}' is not reachable: {status.get('error', 'unknown')}",
+            )
+        steps_completed.append(f"verified_{node}")
+
+    # Step 2: Configure host
+    host_result = await cluster_manager.remote_execute(
+        host_node,
+        "teleport_configure_host",
+        {"enabled": True, "identifier": identifier, "port": 0, "quality": quality},
+    )
+    if not host_result.get("success"):
+        return error_response(
+            ErrorCode.REMOTE_EXECUTION_FAILED,
+            f"Failed to configure Teleport host on '{host_node}': {host_result.get('error', 'unknown')}",
+        )
+    steps_completed.append("host_configured")
+
+    # Step 3: Configure client
+    client_result = await cluster_manager.remote_execute(
+        client_node,
+        "teleport_configure_client",
+        {"scene_name": scene_name, "source_name": "Teleport Feed", "identifier": identifier},
+    )
+    if not client_result.get("success"):
+        errors.append(f"Client setup on '{client_node}': {client_result.get('error', 'unknown')}")
+
+    if not errors:
+        steps_completed.append("client_configured")
+
+    # Step 4: Validate — check Teleport status on host
+    validate_result = await cluster_manager.remote_execute(
+        host_node,
+        "teleport_get_status",
+        {},
+    )
+    if validate_result.get("success") and validate_result.get("data", {}).get("teleport_available"):
+        steps_completed.append("validated")
+
+    return success_response({
+        "host_node": host_node,
+        "client_node": client_node,
+        "identifier": identifier,
+        "scene_name": scene_name,
+        "quality": quality,
+        "steps_completed": steps_completed,
+        "errors": errors if errors else None,
+        "fully_configured": len(errors) == 0,
+    })
 
 
 # ------------------------------------------------------------------
@@ -246,6 +378,15 @@ def register_tools(
                 arguments.get("image_path"),
                 arguments.get("force", False),
             ),
+            # Teleport tools (WebSocket-based)
+            "teleport_get_status": lambda: _run_sync(controller.teleport_get_status),
+            "teleport_configure_client": lambda: _run_sync(
+                _teleport_configure_client,
+                controller,
+                arguments.get("scene_name", ""),
+                arguments.get("source_name", "Teleport Feed"),
+                arguments.get("identifier", ""),
+            ),
         }
 
         # UI automation dispatch (only if ui_controller is available)
@@ -285,6 +426,13 @@ def register_tools(
                     ui_controller.stop_all_rtmp_targets,
                     arguments.get("confirmed", False),
                 ),
+                "teleport_configure_host": lambda: _run_sync(
+                    ui_controller.teleport_configure_host,
+                    arguments.get("enabled", True),
+                    arguments.get("identifier", "OBSTeleport"),
+                    arguments.get("port", 0),
+                    arguments.get("quality", 90),
+                ),
             })
 
         # Cluster coordination dispatch (only if cluster_manager is available)
@@ -299,6 +447,14 @@ def register_tools(
                     arguments.get("node", ""),
                     arguments.get("tool", ""),
                     arguments.get("args"),
+                ),
+                "setup_dual_pc_teleport": lambda: _setup_dual_pc_teleport(
+                    cluster_manager,
+                    arguments.get("host_node", "gaming-pc"),
+                    arguments.get("client_node", "streaming-pc"),
+                    arguments.get("identifier", "OBSTeleport"),
+                    arguments.get("scene_name", "Teleport Feed"),
+                    arguments.get("quality", 90),
                 ),
             })
 
