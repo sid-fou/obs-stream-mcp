@@ -1129,6 +1129,136 @@ class OBSUIController:
         })
 
     # ------------------------------------------------------------------
+    # Teleport source properties: host selection dropdown
+    # ------------------------------------------------------------------
+
+    def teleport_select_source_host(
+        self, source_name: str, identifier: str,
+    ) -> dict[str, Any]:
+        """Select the Teleport host from the source properties dropdown.
+
+        Expects the properties dialog to already be open (via WebSocket
+        open_input_properties_dialog). Finds the ComboBox, selects the
+        entry matching the identifier, and clicks OK.
+
+        Args:
+            source_name: Name of the teleport-source input.
+            identifier: Teleport host identifier to match in the dropdown.
+        """
+        with self._lock:
+            obs = self._find_obs_window()
+            if obs is None:
+                return error_response(
+                    ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found",
+                )
+
+            # Wait for properties dialog to appear
+            dialog = None
+            deadline = time.time() + self._ELEMENT_TIMEOUT
+            while time.time() < deadline:
+                try:
+                    dlg = obs.child_window(
+                        title_re=f".*Properties.*{source_name}.*",
+                    )
+                    if dlg.exists():
+                        dialog = dlg
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.3)
+
+            if dialog is None:
+                return error_response(
+                    ErrorCode.UI_ELEMENT_NOT_FOUND,
+                    f"Properties dialog for '{source_name}' not found",
+                )
+
+            time.sleep(0.5)  # Let dialog fully render
+
+            try:
+                return self._select_teleport_host_in_dialog(
+                    dialog, obs, identifier,
+                )
+            except Exception as exc:
+                self._close_teleport_dialog_safely(dialog, obs)
+                return error_response(
+                    ErrorCode.UI_AUTOMATION_FAILED,
+                    f"Failed to select Teleport host: {exc}",
+                )
+
+    def _select_teleport_host_in_dialog(self, dialog, obs, identifier):
+        """Find the ComboBox in the properties dialog and select the host."""
+        descendants = dialog.descendants()
+
+        # Find ComboBox controls
+        combos = [
+            d for d in descendants
+            if d.element_info.control_type == "ComboBox"
+        ]
+        if not combos:
+            self._close_teleport_dialog_safely(dialog, obs)
+            return error_response(
+                ErrorCode.UI_ELEMENT_NOT_FOUND,
+                "No ComboBox found in Teleport source properties dialog",
+            )
+
+        # Find the combo that contains our identifier as an option,
+        # or the first combo if there's only one
+        target_combo = None
+        for combo in combos:
+            try:
+                # Expand to see items
+                combo.click_input()
+                time.sleep(0.3)
+
+                # Check list items
+                items = combo.children(control_type="ListItem")
+                for item in items:
+                    item_text = item.window_text()
+                    if identifier in item_text:
+                        target_combo = combo
+                        # Click the matching item
+                        item.click_input()
+                        time.sleep(0.3)
+                        break
+
+                if target_combo is not None:
+                    break
+
+                # Collapse if not the right combo
+                combo.click_input()
+                time.sleep(0.2)
+            except Exception:
+                continue
+
+        if target_combo is None:
+            # Try alternate approach: select by text on the combo directly
+            for combo in combos:
+                try:
+                    combo.select(identifier)
+                    target_combo = combo
+                    break
+                except Exception:
+                    pass
+
+        if target_combo is None:
+            self._close_teleport_dialog_safely(dialog, obs)
+            return error_response(
+                ErrorCode.UI_ELEMENT_NOT_FOUND,
+                f"Could not find '{identifier}' in any dropdown. "
+                "Host may not be discovered yet — ensure Teleport is "
+                "enabled on the host machine.",
+            )
+
+        # Click OK
+        self._close_teleport_dialog_safely(dialog, obs)
+
+        return success_response({
+            "source_host_selected": True,
+            "identifier": identifier,
+        })
+
+    # ------------------------------------------------------------------
     # Public API: Teleport plugin
     # ------------------------------------------------------------------
 

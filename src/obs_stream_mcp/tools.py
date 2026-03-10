@@ -166,11 +166,14 @@ def _teleport_configure_client(
     scene_name: str,
     source_name: str,
     identifier: str,
+    ui_controller=None,
 ) -> dict[str, Any]:
     """Add a teleport-source to a scene on the client machine.
 
     Creates the scene if it doesn't exist. Uses obs_add_source internally
     with source_type='teleport-source' and teleport_list=identifier.
+    After creation, opens the source properties dialog and selects the
+    matching host from the Teleport dropdown via UI automation.
     """
     if not scene_name:
         return error_response(ErrorCode.INVALID_PARAMETER, "scene_name must not be empty")
@@ -186,6 +189,7 @@ def _teleport_configure_client(
         return create_result
 
     # Add teleport-source
+    source_created = True
     result = controller.add_source(
         scene_name=scene_name,
         source_name=source_name,
@@ -194,13 +198,33 @@ def _teleport_configure_client(
         enabled=True,
     )
     if not result["success"]:
-        return result
+        # Source might already exist — that's OK, we still need to
+        # select the host in the properties dialog
+        if "already exists" in result.get("error", ""):
+            source_created = False
+        else:
+            return result
+
+    # Select the host from the properties dropdown via UI automation
+    host_selected = False
+    if ui_controller is not None:
+        import time
+        # Open properties dialog via WebSocket
+        open_result = controller.open_input_properties_dialog(source_name)
+        if open_result["success"]:
+            time.sleep(0.8)  # Let dialog appear
+            select_result = ui_controller.teleport_select_source_host(
+                source_name, identifier,
+            )
+            host_selected = select_result.get("success", False)
 
     return success_response({
         "scene_name": scene_name,
         "source_name": source_name,
         "source_type": "teleport-source",
         "identifier": identifier,
+        "source_created": source_created,
+        "host_selected": host_selected,
         "configured": True,
     })
 
@@ -386,6 +410,7 @@ def register_tools(
                 arguments.get("scene_name", ""),
                 arguments.get("source_name", "Teleport Feed"),
                 arguments.get("identifier", ""),
+                ui_controller,
             ),
         }
 

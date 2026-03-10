@@ -792,6 +792,25 @@ class OBSController:
         )
 
     # ------------------------------------------------------------------
+    # UI dialog triggers (WebSocket-based)
+    # ------------------------------------------------------------------
+
+    def open_input_properties_dialog(self, input_name: str) -> dict[str, Any]:
+        """Open the properties dialog for an input via WebSocket.
+
+        This triggers the OBS UI to show the properties window,
+        which can then be automated via pywinauto.
+        """
+        if not self._require_connection():
+            return self._not_connected()
+        try:
+            self._client.open_input_properties_dialog(input_name)
+            return success_response({"input_name": input_name, "dialog_opened": True})
+        except Exception as exc:
+            code, msg = classify_obs_error(exc)
+            return error_response(code, msg)
+
+    # ------------------------------------------------------------------
     # Teleport plugin status (WebSocket-based)
     # ------------------------------------------------------------------
 
