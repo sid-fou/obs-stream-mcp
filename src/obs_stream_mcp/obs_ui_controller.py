@@ -63,6 +63,26 @@ class OBSUIController:
         except Exception:
             return None
 
+    def _bring_obs_to_foreground(self, obs_win) -> bool:
+        """Restore and foreground the OBS window before any UI operation.
+
+        Handles the case where OBS is minimized or behind other windows —
+        common on single-monitor setups or when a game is fullscreen.
+        Should be called inside the lock, right after a successful
+        _find_obs_window() call.
+
+        Returns True if the window was successfully brought forward.
+        """
+        try:
+            if obs_win.is_minimized():
+                obs_win.restore()
+                time.sleep(0.5)
+            obs_win.set_focus()
+            time.sleep(self._ACTION_DELAY)
+            return True
+        except Exception:
+            return False
+
     def _find_multi_rtmp_dock(self, obs_win):
         """Locate the Multiple Output dock within OBS."""
         try:
@@ -318,6 +338,7 @@ class OBSUIController:
                     ErrorCode.OBS_NOT_CONNECTED,
                     "OBS Studio window not found",
                 )
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -347,6 +368,7 @@ class OBSUIController:
                     ErrorCode.OBS_NOT_CONNECTED,
                     "OBS Studio window not found",
                 )
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -388,6 +410,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -477,6 +500,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -565,6 +589,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -629,6 +654,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -713,6 +739,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -770,6 +797,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -811,6 +839,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             dock = self._find_multi_rtmp_dock(obs)
             if dock is None:
@@ -841,8 +870,7 @@ class OBSUIController:
         """
         # Open Tools menu via menu bar, then click Teleport
         try:
-            obs_win.set_focus()
-            time.sleep(self._ACTION_DELAY)
+            self._bring_obs_to_foreground(obs_win)
 
             menu_bars = obs_win.children(control_type="MenuBar")
             if not menu_bars:
@@ -1151,6 +1179,7 @@ class OBSUIController:
                 return error_response(
                     ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found",
                 )
+            self._bring_obs_to_foreground(obs)
 
             # Wait for properties dialog to appear
             dialog = None
@@ -1299,6 +1328,7 @@ class OBSUIController:
             obs = self._find_obs_window()
             if obs is None:
                 return error_response(ErrorCode.OBS_NOT_CONNECTED, "OBS Studio window not found")
+            self._bring_obs_to_foreground(obs)
 
             last_error = ""
             for attempt in range(3):
